@@ -17,7 +17,8 @@ CMD = "6e1d0002-8c2a-4f0e-9b1a-1edc7a5e0001"
 FRAME = "6e1d0004-8c2a-4f0e-9b1a-1edc7a5e0001"
 
 # perceived brightness (what the bench shows) -> LED PWM value. WS2812 PWM is linear, eyes are not.
-GAMMA = np.array([0 if i < 10 else max(1, round(255 * (i / 255) ** 2.0)) for i in range(256)], np.uint8)
+# below 16 (about 6 %) is off: the director already cuts those, and the lowest PWM steps glow visibly in the dark
+GAMMA = np.array([0 if i < 16 else max(1, round(255 * (i / 255) ** 2.0)) for i in range(256)], np.uint8)
 
 
 class Board:

@@ -461,7 +461,7 @@ def make_handler(eng):
                     with eng.lock:
                         D.resize(int(np.clip(int(body["leds"]), 8, 300)))
                 if "brightness" in body:
-                    D.brightness = float(np.clip(float(body["brightness"]), 0.05, 1))
+                    D.brightness = float(np.clip(float(body["brightness"]), 0.0, 1))
                 if "budget" in body:
                     D.budget_a = float(np.clip(float(body["budget"]), 0.3, 10))
                 if "lookahead" in body:

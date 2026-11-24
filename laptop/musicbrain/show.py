@@ -75,6 +75,7 @@ POOLS = {
 }
 # steps per beat for stepping looks
 RATE = {"smooth": (0.25, 0.25, 0.5, 0.5), "punchy": (0.5, 0.5, 1.0, 1.0), "club": (0.5, 1.0, 1.0, 2.0)}
+BLACK = 16 / 255             # below this a pixel is off (see _finish)
 # brightness of each tier (the only thing that changes overall brightness, slowly)
 TIER_LEVEL = (0.45, 0.62, 0.80, 1.0)
 
@@ -176,7 +177,9 @@ class Rig:
 # ctx: t, bp (continuous beat position incl. sync offset), bar, var (variation), rate, tier, origin, dir
 
 def look_idle(R, A, C, x):
-    return C.pal.at(R.x * 0.6 + x["t"] * 0.01) * 0.06
+    """silence: a faint glow for a few seconds (a pause between songs), then fully off"""
+    fade = float(np.clip(1 - (A.silent_for - 4.0) / 2.0, 0, 1))
+    return C.pal.at(R.x * 0.6 + x["t"] * 0.01) * 0.10 * fade
 
 
 def _clouds(R, t, sp):
@@ -765,7 +768,7 @@ class Director:
         dark = (drop_in is not None and 0 < drop_in < 0.9 * A.period) or \
                (self.look == "build" and A.build > 0.6 and A.energy_fast < 0.45)
         self.blackout += ((1.0 if dark else 0.0) - self.blackout) * (0.5 if dark else 0.35)
-        img = img * (1 - 0.95 * self.blackout)
+        img = img * (1 - self.blackout)                  # dark means dark: fully off
         # hue-preserving clip: a pixel that goes over is scaled down instead of turning white
         m = img.max(axis=1, keepdims=True)
         img = np.where(m > 1, img / np.maximum(m, 1e-6), img)
@@ -786,6 +789,9 @@ class Director:
         return self._finish(self.out.copy())
 
     def _finish(self, out):
+        # anything dimmer than ~6 % is switched off: on real LEDs the lowest steps still glow visibly in a dark
+        # room while they look black on a screen, so cutting them keeps the strip and the bench the same
+        out = np.where(out.max(axis=1, keepdims=True) < BLACK, 0.0, out)
         # power limit for a real WS2812B strip: ~20 mA per channel at full, gamma 2.2
         lin = out ** 2.2
         amps = float(lin.sum()) * 0.020
