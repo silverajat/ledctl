@@ -15,6 +15,8 @@ import numpy as np
 SVC = "6e1d0001-8c2a-4f0e-9b1a-1edc7a5e0001"
 CMD = "6e1d0002-8c2a-4f0e-9b1a-1edc7a5e0001"
 FRAME = "6e1d0004-8c2a-4f0e-9b1a-1edc7a5e0001"
+STATE = "6e1d0003-8c2a-4f0e-9b1a-1edc7a5e0001"
+BLE_LEDS = 59            # LEDs per Bluetooth write: 3 + 177 bytes fits even the smallest common link (185 MTU)
 
 # perceived brightness (what the bench shows) -> LED PWM value. WS2812 PWM is linear, eyes are not.
 # below 16 (about 6 %) is off: the director already cuts those, and the lowest PWM steps glow visibly in the dark
@@ -33,6 +35,7 @@ class Board:
         self.sent = 0
         self.rate = 0.0
         self.alive = True
+        self.dev = {}             # the board's own state (mode, frames it forwarded, bad frames, current)
         if mode != "off":
             threading.Thread(target=self._run, daemon=True).start()
 
@@ -42,7 +45,11 @@ class Board:
         self.new.set()
 
     def state(self):
-        return {"status": self.status, "fps": round(self.rate, 1)}
+        s = {"status": self.status, "fps": round(self.rate, 1)}
+        d = self.dev
+        if d:
+            s["dev"] = {k: d.get(k) for k in ("mode", "fps", "n", "fbad", "ma", "cap", "frx", "fws")}
+        return s
 
     # ------------------------------------------------------------------
     def _run(self):
@@ -128,8 +135,19 @@ class Board:
             return False
         async with BleakClient(dev) as c:
             mtu = getattr(c, "mtu_size", 185) or 185
-            per = max(10, (min(mtu, 512) - 3 - 3) // 3)          # LEDs per write
-            self.status = f"Bluetooth ({per} LEDs/packet)"
+            per = max(10, min(BLE_LEDS, (min(mtu, 512) - 3 - 3) // 3))   # LEDs per write (small: never cut off)
+            self.status = f"Bluetooth ({per} LEDs/packet, MTU {mtu})"
+
+            def on_state(_, data):                              # the board pushes its state (no blocking reads)
+                try:
+                    import json
+                    self.dev = json.loads(bytes(data).decode("utf-8", "replace"))
+                except Exception:
+                    pass
+            try:
+                await asyncio.wait_for(c.start_notify(STATE, on_state), 3.0)
+            except Exception:
+                pass
             self.n_sent = None
             period = 1.0 / self.fps
             while self.alive and c.is_connected:

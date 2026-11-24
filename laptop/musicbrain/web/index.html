@@ -191,7 +191,9 @@ function ui(m){
   const a = m.a, dd = m.d;
   $("song").textContent = m.song || (a.silent ? "waiting for music…" : "playing");
   $("src").textContent = `${m.src} · ${m.sr} Hz`;
-  $("board").textContent = m.board ? `strip: ${m.board.status}${m.board.fps ? " · " + m.board.fps + " fps" : ""}` : "";
+  const bd = m.board && m.board.dev;
+  $("board").textContent = m.board ? `strip: ${m.board.status}${m.board.fps ? " · sending " + m.board.fps + " fps" : ""}` +
+    (bd ? ` · board: ${bd.mode}, showing ${bd.fps} fps, ${bd.n} LEDs${bd.fbad ? ", " + bd.fbad + " bad frames" : ""}, ${bd.ma} mA` : "") : "";
   $("bpm").textContent = a.silent ? "—" : `${a.bpm.toFixed(0)}${a.locked ? "" : "?"}`;
   beatsEl.forEach((b,i) => b.classList.toggle("on", !a.silent && a.locked && i === a.bb && a.phase < 0.5));
   $("look").textContent = dd.mode === "cinema" ? "cinema" : dd.look + (dd.lock !== "auto" ? " (locked)" : "");
