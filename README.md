@@ -10,6 +10,10 @@ It spans the whole stack: a 4-layer PCB, FPGA logic, ESP32 firmware, real-time a
 **Built with:** KiCad · Verilog (Yosys, nextpnr, Icarus) · ESP32-C3 (C++, Arduino) · Python (NumPy, ONNX
 Runtime) · Android (Java) · OpenSCAD
 
+<p align="center"><img src="docs/images/demo_music.gif" alt="The strip around a pinboard, synced to a song: build-up, one dark beat, then the drop" width="640"></p>
+
+*The strip around my pinboard, synced to a song: the build-up, one dark beat, then the drop.*
+
 ![The light bench during a drop](docs/images/bench.png)
 
 ![The ledctl v1 board](docs/images/ledctl_v1_top.png)
