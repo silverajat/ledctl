@@ -1,6 +1,12 @@
 """ledctl music brain: listens to what the laptop plays and runs a light show
 on the board's addressable strip, with a virtual copy at http://localhost:8766.
 
+Two modes, switched automatically (or set on the bench):
+  music  - the club show: beats, bars, drums, builds and drops; songs played before get a pre-planned
+           show from their recording (songmap.py)
+  cinema - films, YouTube, games: the strip takes the screen's colours and reacts to the sound
+           (dialogue calm, score swells, impacts) (cinema.py)
+
   python brain.py                 # live: whatever Spotify / the laptop is playing
   python brain.py --wav song.wav  # test with a file
   python brain.py --leds 115     # strip length (default 115)
@@ -28,6 +34,8 @@ from genre import GenreNet
 from board import Board
 from prefs import Prefs, KNOBS
 from show import PALETTES
+from songmap import SongMap
+from cinema import Screen, INTENSITY
 import audio_in
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -35,11 +43,13 @@ SESS = os.path.join(HERE, "sessions")
 RECS = os.path.join(HERE, "recordings")
 
 # A/B: which looks to try instead of the current one
-LOOK_ALTS = {"groove": ["chase", "bassline", "swell", "punch"], "chase": ["groove", "peak", "punch", "swell"],
-             "peak": ["punch", "swell", "chase"], "swell": ["peak", "punch", "groove"], "punch": ["peak", "swell", "chase"],
-             "ambient": ["breakdown", "bassline", "swell"], "breakdown": ["ambient", "swell", "bassline"],
-             "bassline": ["groove", "ambient", "swell"], "build": ["chase", "groove"]}
-KNOB_TRIES = {"exposure": (1.4, 0.7), "white": (2.5, 0.4), "vocal": (1.8, 0.5), "pulse": (1.35, 0.6), "release": (3.0, 0.4)}
+LOOK_ALTS = {"wash": ["bassfloor", "sweep"], "bassfloor": ["wash", "stripes", "bounce"],
+             "bounce": ["stripes", "punch", "split", "chase"], "stripes": ["bounce", "chase", "sweep"],
+             "sweep": ["scanner", "swell", "stripes"], "chase": ["scanner", "stripes", "sweep"],
+             "scanner": ["sweep", "chase", "peak"], "split": ["punch", "bounce"],
+             "peak": ["scanner", "punch", "sweep"], "punch": ["peak", "split", "bounce"],
+             "swell": ["sweep", "wash", "peak"]}
+KNOB_TRIES = {"exposure": (1.4, 0.7), "vocal": (1.8, 0.5), "release": (3.0, 0.4)}
 KNOB_NAMES = {"exposure": "brightness", "white": "how much white", "vocal": "voice light", "pulse": "kick pulses",
               "release": "smoothness"}
 
@@ -98,6 +108,41 @@ class Recorder:
 HOP = 512
 
 
+class ModeSwitch:
+    """music or cinema: Spotify playing or music on its own = music; speech or film effects = cinema.
+    Switches only when the new answer holds for a few seconds."""
+
+    def __init__(self):
+        self.setting = "auto"
+        self.active = "music"
+        self.reason = "starting"
+        self.want, self.since = None, 0.0
+
+    def update(self, t, song, scene, silent):
+        if self.setting != "auto":
+            self.active, self.reason = self.setting, "set on the bench"
+            return
+        spotify = bool(song) and " - " in song and not song.startswith("(")
+        sp, mu, fx = scene.get("speech", 0), scene.get("music", 0), scene.get("fx", 0)
+        if spotify:
+            want, why = "music", "Spotify is playing"
+        elif silent:
+            return
+        elif mu > 0.35 and sp < 0.25:
+            want, why = "music", "music"
+        elif sp > 0.3 or fx > 0.15:
+            want, why = "cinema", "speech / film sounds"
+        else:
+            return
+        if want == self.active:
+            self.want, self.reason = None, why
+            return
+        if want != self.want:
+            self.want, self.since = want, t
+        if t - self.since >= (2.0 if spotify else 6.0):
+            self.active, self.reason, self.want = want, why, None
+
+
 def _np(o):
     if isinstance(o, np.generic):
         return o.item()
@@ -153,7 +198,7 @@ def now_playing():
 
 # ---------------------------------------------------------------- engine
 class Engine:
-    def __init__(self, src, leds, board="auto"):
+    def __init__(self, src, leds, board="auto", plan_dir=None):
         self.src = src
         self.board = Board(board)
         self.A = Analyzer(src.sr, hop=HOP)
@@ -166,6 +211,11 @@ class Engine:
         self.prefs = Prefs(os.path.join(HERE, "prefs.json"))
         self.D.prefs = self.prefs
         self.recorder = None if isinstance(src, audio_in.WavSource) else Recorder(src.sr)
+        self.plan = SongMap(plan_dir or RECS, src.sr, HOP)       # known songs: the pre-planned show
+        self.modes = ModeSwitch()
+        self.screen = None                                       # started the first time cinema mode runs
+        self.screen_on = True
+        self.V = None
         self.ab = False
         self.D2 = None
         self.q = None
@@ -219,17 +269,44 @@ class Engine:
                     A.tempo_prior = G.tempo_prior
                     A.singing = G.singing
                     A.singing_known = G.runs > 2
-                    self.D.set_genre(G.family, G.family_conf, G.valence)
+                    self.D.set_genre(G.family, G.family_conf, G.valence, dict(G.fam_scores, _top=G.top_family), self.V if self.V is not None else A)
             if self.recorder is not None:
                 self.recorder.feed(self.song, blk, A.silent_for)
-            fr = self.D.render(A, A.t, A.dt)
+            D = self.D
+            if A.n % 25 == 0:
+                scene = G.scene if (G is not None and G.ok) else {}
+                self.modes.update(A.t, self.song, scene, A.silent_for > 2.0)
+                D.scene = scene
+                if D.mode != self.modes.active:
+                    D.mode = self.modes.active
+                    self.events.append({"t": round(A.t, 2), "k": "mode", "v": D.mode})
+                    if D.mode == "cinema":
+                        self.ab, self.D2, self.q = False, None, None
+            # known songs (music mode): find where we are in the recording, lay its answers over the live analysis
+            V = A
+            if D.mode == "music":
+                self.plan.set_song(self.song, A.t)
+                self.plan.feed(A)
+                if A.n % int(A.fps * 2) == 0:
+                    self.plan.match_async()
+                V = self.plan.view(A)
+            # cinema mode: the screen's colours
+            want_screen = D.mode == "cinema" and self.screen_on
+            if want_screen and self.screen is None:
+                self.screen = Screen()
+            if self.screen is not None:
+                self.screen.on = want_screen
+                D.screen_on = want_screen and self.screen.ok
+                D.screen_img = self.screen.get() if want_screen else None
+            self.V = V
+            fr = D.render(V, A.t, A.dt)
             fr2 = None
-            if self.ab:
+            if self.ab and D.mode == "music":
                 if self.D2 is None or A.t - self.q_t > 45 or self._question_moot():
                     self.new_question()
                 if self.D2 is not None:
                     self.D2.family = self.D.family
-                    fr2 = self.D2.render(A, A.t, A.dt)
+                    fr2 = self.D2.render(V, A.t, A.dt)
                     self.D2.events.clear()
             if self.board.mode != "off":
                 self.board.push(fr)
@@ -240,13 +317,13 @@ class Engine:
                 for e in self.D.events:
                     self.events.append({"t": round(A.t, 2), "k": e[0], "v": e[1]})
                 self.D.events.clear()
-                if A.drop:
-                    self.events.append({"t": round(A.t, 2), "k": "drop", "v": ""})
-                if A.section_change:
-                    self.events.append({"t": round(A.t, 2), "k": "section", "v": A.section_id})
+                if V.drop:
+                    self.events.append({"t": round(A.t, 2), "k": "drop", "v": "planned" if getattr(V, "planned", False) else ""})
+                if V.section_change:
+                    self.events.append({"t": round(A.t, 2), "k": "section", "v": getattr(V, "plan_label", V.section_id)})
                 self.timeline.append((round(A.t, 3), round(A.energy_fast, 2), round(A.intensity, 2),
                                       int(A.hit_kick), int(A.hit_snare), int(A.hit_hat),
-                                      int(A.beat_tick), int(A.beat_tick and A.downbeat), round(A.build, 2)))
+                                      int(V.beat_tick), int(V.beat_tick and V.downbeat), round(V.build, 2)))
             if A.t - self.last_rec >= 0.05:
                 self.last_rec = A.t
                 st = self.snapshot_state()
@@ -320,8 +397,17 @@ class Engine:
         self.D2 = None                            # next question on the next hop
         return "saved"
 
-    def snapshot_state(self):
+    def view_state(self):
+        """the analysis as the bench shows it (with the known song's beat grid when there is one)"""
         s = self.A.state()
+        V = self.V
+        if V is not None and getattr(V, "planned", False):
+            s.update(bpm=round(V.bpm, 1), conf=1.0, locked=True, phase=round(V.phase, 3), beat=V.beat,
+                     bb=V.bar_beat, bar=V.bar, build=round(V.build, 2), sec=getattr(V, "plan_label", V.section_id))
+        return s
+
+    def snapshot_state(self):
+        s = self.view_state()
         s.update(self.D.state())
         if self.G is not None:
             s.update(self.G.state())
@@ -388,6 +474,15 @@ def make_handler(eng):
                     return self._send(200, eng.vote(int(body["vote"])))
                 if body.get("newpal"):
                     D._new_palette(eng.A)
+                if body.get("mode") in ("auto", "music", "cinema"):
+                    eng.modes.setting = body["mode"]
+                    eng.modes.update(eng.A.t, eng.song, D.scene, False)
+                if body.get("intensity") in INTENSITY:
+                    D.cine.intensity = body["intensity"]
+                if "screen" in body:
+                    eng.screen_on = bool(body["screen"])
+                if "flip" in body:
+                    D.cine.flip = bool(body["flip"])
                 return self._send(200, "ok")
             if self.path == "/feedback":
                 eng.feedback(body.get("kind", "note"), str(body.get("note", ""))[:500])
@@ -409,7 +504,7 @@ def make_handler(eng):
                         q = {k: eng.q[k] for k in ("what", "type")} if eng.q else None
                         if eng.q and eng.q["flip"] and fr2:
                             fr, fr2 = fr2, fr
-                        a = eng.A.state()
+                        a = eng.view_state()
                         d = eng.D.state()
                         g = eng.G.state() if eng.G is not None else {"glabel": "genre net off"}
                         evs = list(eng.events)
@@ -422,6 +517,10 @@ def make_handler(eng):
                     msg = {"f": base64.b64encode(fr).decode(), "f2": base64.b64encode(fr2).decode() if fr2 else None,
                            "q": q, "ab": eng.ab, "board": eng.board.state(), "votes": eng.prefs.d["votes"], "a": a, "d": d, "g": g, "song": eng.song,
                            "ev": new_ev, "tl": tl, "cpu": round(eng.cpu * 100, 1),
+                           "plan": eng.plan.state(), "known": eng.plan.n_known,
+                           "mode": {"set": eng.modes.setting, "active": eng.modes.active, "why": eng.modes.reason,
+                                    "screen": eng.screen_on, "screen_ok": (eng.screen.ok if eng.screen else None),
+                                    "screen_err": (eng.screen.err if eng.screen else "")},
                            "src": eng.src.name, "sr": eng.src.sr}
                     self.wfile.write(("data: " + jdump(msg) + "\n\n").encode())
                     self.wfile.flush()
@@ -443,12 +542,18 @@ def main():
 
     src = audio_in.WavSource(HOP, args.wav) if args.wav else audio_in.open_loopback(HOP)
     print(f"audio: {src.name} @ {src.sr} Hz")
-    eng = Engine(src, args.leds, "off" if args.wav else args.board)
+    eng = Engine(src, args.leds, "off" if args.wav else args.board,
+                 plan_dir=os.path.dirname(os.path.abspath(args.wav)) if args.wav else None)
+    if args.wav:
+        eng.song = os.path.basename(args.wav)[:-4]            # a recording with a .truth.json plays as a known song
     threading.Thread(target=eng.run, daemon=True).start()
 
     def song_poll():
         while eng.running:
             try:
+                if args.wav:
+                    time.sleep(1.0)
+                    continue
                 s = now_playing()
                 if s != eng.song:
                     eng.song = s

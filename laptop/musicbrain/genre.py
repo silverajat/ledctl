@@ -32,6 +32,10 @@ MOODS = {271: ("happy", 0.4, 0.9), 272: ("sad", -0.6, -0.9), 273: ("tender", -0.
 # typical tempo per family, as a beat tracker would count it
 TEMPO_OF = {"rnb": 85.0, "hiphop": 90.0, "edm": 126.0, "pop": 110.0, "rock": 125.0, "chill": 90.0}
 SINGING, MUSIC, SPEECH = 24, 132, 0
+SPEECH_CLS = [0, 1, 2, 3, 6, 11, 12]                     # speech, conversation, narration, shout, scream, whisper
+FX_CLS = [420, 421, 422, 426, 427, 428, 430, 460, 463, 464, 280, 281, 437, 453, 294, 301, 337, 390]
+# explosion, gunshot, machine gun, fireworks, firecracker, burst, boom, bang, smash, breaking, thunderstorm,
+# thunder, shatter, whoosh, vehicle, car, engine, siren
 
 
 class GenreNet:
@@ -45,6 +49,7 @@ class GenreNet:
         self.family = None
         self.family_conf = 0.0
         self.fam_scores = {}
+        self.top_family = None
         self.label = "listening…"
         self.mood = None
         self.arousal = 0.0
@@ -53,6 +58,7 @@ class GenreNet:
         self.tempo_prior = None
         self._acc = np.zeros(0, np.float32)
         self.runs = 0
+        self.scene = {"speech": 0.0, "music": 0.0, "fx": 0.0}   # what the sound is right now (fast)
         try:
             import onnxruntime as ort
             so = ort.SessionOptions()
@@ -101,12 +107,16 @@ class GenreNet:
                     x = self.ring.copy()
                 if float(np.mean(x * x)) < 1e-7:
                     self.label = "silence"
+                    self.scene = {k: v * 0.5 for k, v in self.scene.items()}
                     return
                 pk = float(np.max(np.abs(x)))
                 if pk > 0:
                     x = x / max(pk, 0.1) * 0.5          # level-independent
                 sc = self.sess.run(None, {self.inp: x})[0].mean(axis=0)
                 self.avg += (sc - self.avg) * 0.25
+                now = {"speech": float(sc[SPEECH_CLS].max()), "music": float(sc[MUSIC]),
+                       "fx": float(sc[FX_CLS].max())}
+                self.scene = {k: round(self.scene[k] + (v - self.scene[k]) * 0.6, 3) for k, v in now.items()}
                 self._interpret()
             except Exception as e:  # noqa
                 self.label = "net error: " + str(e)[:60]
@@ -118,6 +128,7 @@ class GenreNet:
             fam[f] = fam.get(f, 0.0) + float(a[idx])
         tot = sum(fam.values())
         self.fam_scores = {k: round(v, 3) for k, v in fam.items()}
+        self.fam_scores_raw = dict(fam)
         best = max(fam, key=fam.get)
         conf = min(1.0, tot / 0.10)
         # hysteresis: switch family only when the new one clearly leads
@@ -125,6 +136,7 @@ class GenreNet:
             self.family = best
         self.family_conf = conf
         g = sorted(NAMES, key=lambda i: -a[i])[:2]
+        self.top_family = FAMILY_OF.get(g[0]) if a[g[0]] > 0.01 else None
         mi = max(MOODS, key=lambda i: a[i])
         self.mood = MOODS[mi][0] if a[mi] > 0.01 else None
         w = sum(a[i] for i in MOODS) + 1e-9
@@ -139,4 +151,4 @@ class GenreNet:
 
     def state(self):
         return {"family": self.family, "fconf": round(self.family_conf, 2), "glabel": self.label,
-                "sing": round(self.singing, 2), "fam": self.fam_scores, "net": self.ok}
+                "sing": round(self.singing, 2), "fam": self.fam_scores, "net": self.ok, "scene": self.scene}

@@ -7,6 +7,8 @@ Per hop (~10 ms) it produces:
   - energy (how loud relative to this song), intensity (energy + bass + drum density)
   - chroma, key (major/minor), chord changes, lead pitch (for the melody layer)
   - section events: novelty (something changed), build-up progress, drop
+  - drums vs. sustained sound (a cheap harmonic/percussive split), stereo balance,
+    risers (the rising noise sweep before a drop) and impacts (big broadband hits, also in films)
 All of it is causal (real time): nothing looks ahead.
 """
 import math
@@ -248,6 +250,23 @@ class Analyzer:
         self.bdb_fast = -80.0
         self.build_dbg = None
 
+        # ---- deeper breakdown ----
+        self.lm_ring = np.zeros((9, nb))          # last 9 frames of log-mel, for the harmonic/percussive split
+        self.perc = 0.0                           # 0..1 how much of the sound right now is drums / transients
+        self.tonal = 0.0                          # 0..1 how steady (sustained notes, pads, voice) it is
+        self.lr = 0.0                             # stereo balance -1 (left) .. +1 (right), exaggerated
+        self.lvl_l = self.lvl_r = 0.0             # per-side level 0..1
+        self.flat = 0.0                           # spectral flatness of the top end (noise sweeps are flat)
+        self.cen_fast = 0.0
+        self.cen_ring = np.zeros(48)              # centroid every 4 hops (~2 s)
+        self.flat_ring = np.zeros(48)
+        self.hi_ring = np.zeros(48)
+        self.riser = 0.0                          # 0..1 a rising sweep is happening
+        self.impact = False                       # True on the hop a big broadband hit lands
+        self.impact_strength = 0.0
+        self.impact_env = 0.0
+        self.boom = Onset(fps, k=2.6, floor=2.2, gap=0.35, tau=1.5)
+
     # ------------------------------------------------------------------
     def process(self, x):
         """x: float32 block of `hop` samples, mono (hop,) or stereo (hop, 2)"""
@@ -271,6 +290,7 @@ class Analyzer:
         mag = np.sqrt(p)
         em = self.mel @ p
         lm = 10.0 * np.log10(em + 1e-12)
+        self.lm = lm                                  # raw log-mel (the known-song matcher uses it)
 
         # ---- loudness ----
         tot = float(np.mean(self.buf[-hop * 2:] ** 2))
@@ -326,6 +346,7 @@ class Analyzer:
         w = em / (em.sum() + 1e-12)
         cen = float(np.sum(w * np.arange(self.nb)) / self.nb)
         self.centroid = ema(self.centroid, cen, alpha(0.5, self.fps))
+        self._breakdown(lm, em, p, sL, sR, cen)
 
         # ---- drum onsets: log-flux (dB rise) per group, lag 2 hops ----
         d = np.maximum(0.0, lm - self.lm_prev2)
@@ -358,6 +379,10 @@ class Analyzer:
         self.kick_env = max(self.kick_env * dec, self.kick.strength if self.hit_kick else 0)
         self.snare_env = max(self.snare_env * dec, self.snare.strength if self.hit_snare else 0)
         self.hat_env = max(self.hat_env * math.exp(-self.dt / 0.06), self.hat.strength if self.hit_hat else 0)
+        self.impact = self.boom.push(fall, t) and self.energy_fast > 0.45 and (self.bass_fast_rel > 0.55 or fall > 6.0)
+        if self.impact:
+            self.impact_strength = self.boom.strength
+        self.impact_env = max(self.impact_env * math.exp(-self.dt / 0.25), self.impact_strength if self.impact else 0.0)
         a_r = alpha(3.0, self.fps)
         self.onset_rate = ema(self.onset_rate, (self.hit_kick + self.hit_snare + self.hit_hat) * self.fps, a_r)
 
@@ -519,6 +544,65 @@ class Analyzer:
         self.minor = bool(best % 2)
         self.key_conf = float(bv)
 
+    def _breakdown(self, lm, em, p, sL, sR, cen):
+        fps = self.fps
+        # harmonic / percussive: a sustained sound looks like the median of the last frames; drums stick out of it
+        self.lm_ring = np.roll(self.lm_ring, -1, axis=0)
+        self.lm_ring[-1] = lm
+        med = np.median(self.lm_ring, axis=0)
+        rng = np.maximum(self.peakb - self.floor, 6.0)
+        pos = np.maximum(0.0, lm - med) / rng
+        dev = np.abs(lm - med) / rng
+        loud = self.norm > 0.15
+        if self.silence or not loud.any():
+            pr, tn = 0.0, 0.0
+        else:
+            pr = float(np.clip(np.mean(pos[loud]) * 4.0, 0, 1))
+            tn = float(np.clip(1.0 - np.mean(dev[loud]) * 4.0, 0, 1))
+        self.perc = ema(self.perc, pr, alpha(0.4, fps))
+        self.tonal = ema(self.tonal, tn, alpha(0.8, fps))
+        # stereo balance (whole band, 60 Hz - 8 kHz)
+        sel = (self.freqs > 60) & (self.freqs < 8000)
+        eL = float(np.sum(np.abs(sL[sel]) ** 2))
+        eR = float(np.sum(np.abs(sR[sel]) ** 2))
+        if eL + eR > 1e-9 and not self.silence:
+            b = (eR - eL) / (eR + eL)
+            self.lr = ema(self.lr, float(np.clip(b * 3.0, -1, 1)), alpha(0.15, fps))
+            dl = 10 * math.log10(eL / (self.nfft * 0.25) + 1e-12)
+            dr = 10 * math.log10(eR / (self.nfft * 0.25) + 1e-12)
+            self.lvl_l = ema(self.lvl_l, float(np.clip(1 + (dl - self.lv_ref - 3) / 12, 0, 1)), alpha(0.08, fps))
+            self.lvl_r = ema(self.lvl_r, float(np.clip(1 + (dr - self.lv_ref - 3) / 12, 0, 1)), alpha(0.08, fps))
+        else:
+            self.lvl_l *= 0.9
+            self.lvl_r *= 0.9
+        # flatness of 2-12 kHz (1 = noise, 0 = tones)
+        hs = (self.freqs > 2000) & (self.freqs < 12000)
+        ph = p[hs] + 1e-12
+        fl = float(np.exp(np.mean(np.log(ph))) / np.mean(ph))
+        self.flat = ema(self.flat, fl, alpha(0.3, fps))
+        self.cen_fast = ema(self.cen_fast, cen, alpha(0.1, fps))
+        # riser: over the last ~2 s the sound gets steadily brighter / noisier / louder up top
+        if self.n % 4 == 0:
+            hi = float(np.mean(self.norm[self.g_hat])) if len(self.g_hat) else 0.0
+            for name, v in (("cen_ring", self.cen_fast), ("flat_ring", self.flat), ("hi_ring", hi)):
+                r = getattr(self, name)
+                r[:-1] = r[1:]
+                r[-1] = v
+            if self.n > 48 * 4 and not self.silence:
+                x = np.arange(48, dtype=float)
+                def slope(v):
+                    k, c = np.polyfit(x, v, 1)
+                    res = v - (k * x + c)
+                    return k * 48, 1 - res.var() / (v.var() + 1e-12)
+                kc, rc = slope(self.cen_ring)
+                kf, rf = slope(self.flat_ring)
+                kh, rh = slope(self.hi_ring)
+                score = (kc > 0.06 and rc > 0.6) + (kf > 0.05 and rf > 0.6) + (kh > 0.2 and rh > 0.6)
+                target = min(1.0, score / 2.0)
+                self.riser = ema(self.riser, target, 0.3 if target > self.riser else 0.05)
+            elif self.silence:
+                self.riser *= 0.9
+
     def _vocal(self, sL, sR):
         """level and stereo position of the voice band; syllable onsets"""
         eL = float(np.sum(np.abs(sL[self.vsel]) ** 2))
@@ -655,6 +739,8 @@ class Analyzer:
             lowbass = np.mean([f["brel"] for f in F[-4:]]) < 0.35
             self.build_dbg = (round(float(sh), 2), round(float(rh), 2), round(float(se), 3), round(float(re), 2),
                               round(float(so), 2), round(float(ro), 2), bool(lowbass))
+            if self.riser > 0.5:
+                rising += 1                       # a noise sweep / rising synth is the classic build signal
             if rising >= 2 or (rising >= 1 and lowbass):
                 self.build = min(1.0, self.build + 1.0 / 20.0)
             elif lowbass and self.build > 0.3:
@@ -701,4 +787,6 @@ class Analyzer:
             "build": round(self.build, 2), "sec": self.section_id, "lead": round(self.lead_pos, 2),
             "silent": self.silent_for > 1.0, "db": round(self.db, 1),
             "vox": round(self.vocal, 2), "pan": round(self.vocal_pan, 2),
+            "perc": round(self.perc, 2), "tonal": round(self.tonal, 2), "lr": round(self.lr, 2),
+            "riser": round(self.riser, 2), "impact": round(self.impact_env, 2),
         }

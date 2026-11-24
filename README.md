@@ -20,14 +20,23 @@ Runtime) · Android (Java) · OpenSCAD
 
 ## What it does
 
-- **Follows the music, not just the volume.** Kick drums send pulses along the strip, snares make bursts,
-  hi-hats sparkle, and the singer's voice is a soft glow placed where the voice sits in the stereo mix.
-  Movement is locked to the beat clock, and looks only change on the first beat of a bar.
-- **Knows the shape of a song.** It detects build-ups (the strip speeds up and fills in), goes dark in the
-  silence right before a drop, then hits the big look exactly on the drop.
-- **Lights each genre differently.** A neural network ([YAMNet](https://tfhub.dev/google/yamnet/1)) tells
-  R&B and soul (deep blues and purples, smooth swells) from hip-hop, EDM, pop and rock, and sets the colour
-  family and how punchy the show is.
+- **Lights it like a club LJ, not a VU meter.** The beat goes into movement and colour (bars snapping to
+  new positions, colours bouncing between two opposite hues, sweeps, step chases) while brightness only
+  follows the size of the section. The strip is treated as 8 virtual fixtures; one base colour, one moving
+  layer and at most one accent at a time.
+- **Knows the shape of a song.** Looks hold for a phrase and vary every 4 bars. Build-ups close in from the
+  ends and double their step rate, the beat before a drop goes dark, and the drop hits on the beat.
+- **Plans songs it has heard before.** Every song is recorded locally and analysed offline (beats, bars,
+  sections, drops). When it plays again, the live audio is matched against the recording (one FFT over the
+  whole song, level-independent, follows seeks), so drops land exactly and the build-up starts on time.
+- **Colours follow the harmony.** A neural network ([YAMNet](https://tfhub.dev/google/yamnet/1)) picks the
+  colour family (R&B, hip-hop, EDM, pop, rock, chill), the key picks the palette, and the bass note's place
+  in the key picks which colour leads, so the same song always gets the same colours and they move with the
+  chords. No white: grey and white are never sent to the strip.
+- **Cinema mode for films, YouTube and games.** It switches automatically when it hears speech or film
+  sounds. The strip takes the colours of the laptop screen (Ambilight-style, black bars cut, white turned
+  into a dim tint), dialogue keeps it calm, the score swells it, and explosions send one accent in the
+  scene's own colour.
 - **Learns your taste.** An A/B mode shows two versions of the same moment side by side. Your picks are
   saved per genre and the director follows them.
 - **Runs without the laptop.** The phone app (Bluetooth) and the board's own modes (solid, breathe, party,
@@ -91,7 +100,7 @@ flowchart LR
 
 ## The music brain ([`laptop/musicbrain`](laptop/musicbrain))
 
-**Analysis** (`analysis.py`, all causal, ~10 ms hops):
+**Analysis** (`analysis.py`, all causal, ~10 ms hops, about 1 ms per hop):
 - 40 mel bands, each normalised to its own recent range
 - kick / snare / hi-hat detectors on per-band spectral flux with adaptive thresholds
 - tempo from an autocorrelation with harmonic scoring and a genre-aware prior; beat phase from a PLL on a
@@ -100,11 +109,22 @@ flowchart LR
 - key (Krumhansl), lead pitch, voice level and stereo position
 - sections from novelty spikes on downbeats; build-ups from steady rises with the bass held back;
   drops from the kick and full bass returning
+- a harmonic/percussive split (median filtering over time), stereo balance, risers (rising, noisier top
+  end) and impacts (big broadband hits)
 
-**Director and effects** (`show.py`): tiers of looks (ambient, bassline, groove, chase, swell, punch,
-peak, build, breakdown) chosen from intensity and song events, colour families per genre, auto-exposure,
-hue-preserving limits (no washing out to white), and a power limit for the strip.
+**Director and effects** (`show.py`): 12 looks (wash, bass floor, colour bounce, stripes, sweep, step
+chase, scanners, stereo split, punch, swell, peak, build) in three styles (smooth, punchy, club), chosen
+by the size of the music and held for phrases; snare wipes and impact ripples as rate-limited accents;
+harmony-driven colours; brightness per section; hue-preserving limits and a power limit for the strip.
 This file is also the reference model for moving the effect engine into the FPGA.
+
+**Known songs** (`songmap.py`): finds the position in a recorded song by cosine similarity of the
+spectral shape at every offset (one FFT), locks after two agreeing matches (about 10 s, ~3 ms error),
+and lays the song's real beat grid, sections and upcoming drops over the live analysis.
+
+**Cinema** (`cinema.py`): screen capture through GDI (no extra installs), colour per strip position from
+the bright parts of the picture, de-whitening, cut-aware smoothing, and sound-driven calm / swell /
+impact accents, with subtle, normal and intense settings.
 
 **Teaching it:**
 - **Light bench:** a web page with a virtual strip, a 10 s timeline of what the brain heard, and
@@ -116,9 +136,10 @@ This file is also the reference model for moving the effect engine into the FPGA
 
 ![A build-up and drop, drawn as LEDs over time](docs/images/show_builddrop.png)
 
-*A build-up and drop on a test track, drawn as the strip over time (left to right = 40 s → 70 s):
-the chase speeds up and fills in from the ends, the strip goes dark for the silence before the drop,
-then the peak look hits on the beat.*
+*A build-up and drop on a synthetic test track, drawn as the strip over time (left to right = 40 s → 70 s,
+LEDs top to bottom): mirrored sweeps in the verse; in the build-up the lights close in from the ends while
+the steps speed up and the colours spin; one dark beat; then the drop: mirrored blocks changing colour on
+every beat with scanners crossing over them.*
 
 ## Bring-up: what broke and how I fixed it
 
@@ -139,8 +160,9 @@ The full log is in [`docs/bringup.md`](docs/bringup.md). The short version:
 
 ## Status and next steps
 
-**Working:** the board, FPGA strip driver, ESP32 firmware, phone app, laptop music brain over USB,
-light bench, genre network, A/B taste learning.
+**Working:** the board, FPGA strip driver, ESP32 firmware, phone app, laptop music brain over USB or
+Bluetooth, the LJ-style effect engine, pre-planned shows for known songs, cinema mode, light bench, genre
+network, A/B taste learning.
 
 **Next:**
 - Run the scoring and tuning on a set of recorded songs
