@@ -1,18 +1,22 @@
-"""Cinema mode: lights for films, YouTube and games, the way Ambilight / Hue Sync do it, plus sound.
+"""Cinema mode: lights for films, YouTube and games, plus sound.
 
   - the screen: the laptop screen is grabbed ~25 times a second, shrunk to 64x36 by the graphics driver
-    (cheap, no extra installs). Black bars are cut off, each part of the strip takes the colour of its
-    part of the screen (bright parts count more than dark backgrounds), with a boost in saturation and
-    the white taken out, then smoothed so cuts don't flash
-  - the sound: dialogue keeps the lights calm, a film score lifts them slowly, quiet scenes dim, and big
-    hits (explosions, gunshots, slams) send one accent in the scene's own colour - never a white flash
+    (cheap, no extra installs), black bars cut off
+  - two layouts:
+      room (default)  - the strip is somewhere in the room (around a board, behind a bed, along a shelf),
+                        so it takes the scene's 2-3 main colours, the way Hue Sync lights a room: the
+                        strongest colour in the middle, the second towards the ends, changing slowly
+      screen          - the strip is around the screen: each part takes the colour of the screen edge
+                        next to it (Ambilight)
+    white and grey never become white light: they turn into a dim tint
+  - the sound: dialogue keeps the lights calm, a film score lifts them slowly, quiet scenes dim, big hits
+    (explosions, gunshots, slams) send one accent in the scene's own colour; music with a clear beat sends
+    a soft wave from the centre on each beat. The sound decisions are smoothed over a few seconds so the
+    behaviour doesn't flip back and forth
   - intensity: subtle (films), normal, intense (games), like Hue Sync's settings
 
-  - music in the film (a soundtrack song, a score with a beat): the screen colours move with it, a soft
-    wave from the centre on each beat and a bigger one on each bar; dialogue stays calm
-
 Without screen capture (not Windows, or turned off) it runs a calm palette wash with the same sound
-reactions. DRM-protected video (Netflix and other streaming sites) shows up black to any screen capture:
+reactions. DRM-protected video (Netflix and other streaming sites) can show up black to screen capture:
 when the screen stays black while the film is clearly playing, it switches to mood colours that follow the
 sound until the picture can be seen again.
 """
@@ -24,10 +28,51 @@ import time
 import numpy as np
 
 INTENSITY = {
-    "subtle": dict(tau=0.9, accent=0.35, sat=1.25, motion=0.0),
-    "normal": dict(tau=0.40, accent=0.65, sat=1.45, motion=0.3),
-    "intense": dict(tau=0.15, accent=1.0, sat=1.65, motion=0.6),
+    # tau: how fast colours follow the picture (screen layout); room: the same for the room layout
+    "subtle": dict(tau=0.9, room=3.0, accent=0.35, sat=1.25, motion=0.0),
+    "normal": dict(tau=0.40, room=1.5, accent=0.65, sat=1.45, motion=0.3),
+    "intense": dict(tau=0.15, room=0.6, accent=1.0, sat=1.65, motion=0.6),
 }
+
+
+def hue_of(rgb):
+    mx, mn = rgb.max(axis=-1), rgb.min(axis=-1)
+    c = mx - mn + 1e-9
+    r, g, b = rgb[..., 0], rgb[..., 1], rgb[..., 2]
+    h = np.where(mx == r, ((g - b) / c) % 6, np.where(mx == g, (b - r) / c + 2, (r - g) / c + 4)) / 6
+    return h % 1.0
+
+
+def dominant(img, k=3):
+    """the main colours of a picture: a hue histogram where colourful, bright pixels count most.
+    returns [(rgb normalised to max 1, share), ...] strongest first, and the picture's brightness"""
+    px = img.reshape(-1, 3)
+    mx, mn = px.max(axis=1), px.min(axis=1)
+    sat = (mx - mn) / np.maximum(mx, 1e-3)
+    w = sat ** 1.5 * mx ** 1.5
+    bright = float(mx.mean())
+    if w.sum() < 0.5:
+        return [], bright
+    h = hue_of(px)
+    nb = 24
+    hb = (h * nb).astype(int) % nb
+    hist = np.bincount(hb, weights=w, minlength=nb)
+    hist = 0.5 * hist + 0.25 * (np.roll(hist, 1) + np.roll(hist, -1))
+    out = []
+    hh = hist.copy()
+    total = hist.sum()
+    for _ in range(k):
+        j = int(np.argmax(hh))
+        if hh[j] <= 0 or (out and hh[j] < 0.2 * out[0][2]):
+            break
+        sel = (np.abs((hb - j + nb // 2) % nb - nb // 2) <= 1)
+        ww = w * sel
+        col = (px * ww[:, None]).sum(axis=0) / max(ww.sum(), 1e-9)
+        col = col / max(float(col.max()), 1e-3)
+        out.append((col, float(hh[j] / total), hh[j]))
+        for d in range(-3, 4):                         # the next colour must be at least ~45 degrees away
+            hh[(j + d) % nb] = 0
+    return [(c, sh) for c, sh, _ in out], bright
 
 
 class Screen:
@@ -141,12 +186,27 @@ def de_white(c, sat=1.4):
     return np.where(m2 > 1e-4, out * (mx / np.maximum(m2, 1e-4)), out)
 
 
+def hsv_step(cur, tgt, k):
+    """move colour `cur` toward `tgt` by fraction k, along the shorter way round the hue circle"""
+    import colorsys
+    h0, s0, v0 = colorsys.rgb_to_hsv(*np.clip(cur, 0, 1))
+    h1, s1, v1 = colorsys.rgb_to_hsv(*np.clip(tgt, 0, 1))
+    if s1 < 0.05:
+        h1 = h0
+    if s0 < 0.05:
+        h0 = h1
+    dh = ((h1 - h0 + 0.5) % 1.0) - 0.5
+    return np.array(colorsys.hsv_to_rgb((h0 + dh * k) % 1.0, s0 + (s1 - s0) * k, v0 + (v1 - v0) * k))
+
+
 class Cinema:
     def __init__(self):
         self.intensity = "normal"
+        self.layout = "room"           # or "screen" (strip around the screen)
         self.flip = False
         self.cur = None
         self.prev_target = None
+        self.prev_small = None
         self.flash = 0.0
         self.flash_col = None
         self.last_hit = -9.0
@@ -158,8 +218,16 @@ class Cinema:
         self.black_for = 0.0           # how long the screen has been black while sound plays
         self.protected = False
         self.waves = []                # beat waves (start time, strength)
+        self.sa = None                 # room layout: main colour and second colour (smoothed)
+        self.sb = None
+        # the sound, smoothed over a few seconds so the behaviour doesn't flip back and forth
+        self.sp_s = self.mu_s = 0.0
+        self.dialogue = False
+        self.music_on = False
+        self.mu_since = None
 
     def _screen_target(self, R, img):
+        """strip around the screen: each part takes the colour of the screen edge next to it"""
         img = crop_bars(img)
         lum = img.max(axis=2)
         wgt = lum ** 2 + 0.02                        # the lit things in the picture, not the dark background
@@ -172,9 +240,59 @@ class Cinema:
         bright = float(np.sqrt(np.clip(lum.mean() * 1.6, 0, 1)))
         return tgt, bright
 
+    def _room_target(self, R, img, D, t, dt, P):
+        """strip in the room: the scene's main colour in the middle, the second towards the ends, slowly"""
+        img = crop_bars(img)
+        small = img[::4, ::4]
+        cut = self.prev_small is not None and self.prev_small.shape == small.shape and \
+            float(np.abs(small - self.prev_small).mean()) > 0.2
+        self.prev_small = small
+        cols, bright = dominant(img)
+        tint = D.palette.at(0.5 + t * 0.004) * 0.35
+        if not cols:
+            a = b = tint                                   # grey / white / dark scene: a dim tint, never white
+        else:
+            a = cols[0][0]
+            b = cols[1][0] if len(cols) > 1 and cols[1][1] > 0.12 else a * 0.55
+        if self.sa is None:
+            self.sa, self.sb = np.array(a, float), np.array(b, float)
+        # keep each colour in its place: if the two swapped ranks, don't swap them on the strip
+        if np.abs(a - self.sb).sum() + np.abs(b - self.sa).sum() < np.abs(a - self.sa).sum() + np.abs(b - self.sb).sum():
+            a, b = b, a
+        tau = P["room"] / (3 if cut else 1)
+        k = 1 - math.exp(-dt / tau)
+        self.sa = hsv_step(self.sa, a, k)              # around the colour wheel, never through grey
+        self.sb = hsv_step(self.sb, b, k)
+        d = 1 - R.dc if self.flip else R.dc
+        # two zones with a short soft border (a long blend between opposite colours would turn grey)
+        m = np.clip((d - 0.42 + 0.06 * math.sin(2 * math.pi * t * 0.03)) / 0.18, 0, 1)
+        m = m * m * (3 - 2 * m)
+        tgt = self.sa * (1 - m)[:, None] + self.sb * m[:, None]
+        want = self.sa.max() * (1 - m) + self.sb.max() * m        # keep the brightness through the border
+        tgt = tgt * (want / np.maximum(tgt.max(axis=1), 1e-3))[:, None]
+        return tgt, float(np.sqrt(np.clip(bright * 1.6, 0, 1)))
+
+    def _sound(self, scene, A, t, dt):
+        k = 1 - math.exp(-dt / 3.0)
+        self.sp_s += (scene.get("speech", 0.0) - self.sp_s) * k
+        self.mu_s += (scene.get("music", 0.0) - self.mu_s) * k
+        if not self.dialogue and self.sp_s > 0.35 and self.mu_s < 0.3:
+            self.dialogue = True
+        elif self.dialogue and (self.sp_s < 0.2 or self.mu_s > 0.45):
+            self.dialogue = False
+        if self.mu_s > 0.45:
+            self.mu_since = self.mu_since if self.mu_since is not None else t
+        else:
+            self.mu_since = None
+        if not self.music_on and self.mu_since is not None and t - self.mu_since > 3.0:
+            self.music_on = True
+        elif self.music_on and self.mu_s < 0.3:
+            self.music_on = False
+
     def render(self, R, A, D, t, dt):
         P = INTENSITY.get(self.intensity, INTENSITY["normal"])
         scene = getattr(D, "scene", None) or {}
+        self._sound(scene, A, t, dt)
         scr = getattr(D, "screen_img", None)
         if scr is not None:
             # a black screen while the film is clearly playing = the picture is protected (DRM)
@@ -185,15 +303,16 @@ class Cinema:
                 self.black_for, self.protected = 0.0, False
             if self.black_for > 1.5:
                 self.protected = True
+        room = self.layout != "screen"
         if scr is not None and not self.protected:
-            tgt, bright = self._screen_target(R, scr)
+            tgt, bright = self._room_target(R, scr, D, t, dt, P) if room else self._screen_target(R, scr)
             self.last_screen = (tgt, bright)
             src = "screen"
         elif self.last_screen is not None and getattr(D, "screen_on", False) and not self.protected:
             tgt, bright = self.last_screen
             src = "last screen colours"
         else:
-            # mood colours that follow the sound: calmer and cooler in dialogue, warmer in action
+            # mood colours that follow the sound
             m = 0.5 + 0.5 * np.sin(2 * math.pi * (R.x * 0.8 + t * 0.02))
             tgt = D.palette.at(R.x * 0.4 + t * 0.005) * (0.6 + 0.4 * m)[:, None]
             bright = 0.45 + 0.4 * A.energy
@@ -209,8 +328,8 @@ class Cinema:
         tgt = tgt * (1 - neutral) + tint * neutral
         mx = tgt.max(axis=1, keepdims=True)
         tgt = np.where(mx > 1e-4, tgt / np.maximum(mx, 1e-4), tgt) * np.clip(mx * 1.3, 0, 1)    # lift dim colours
-        # scene cuts: change faster, but never flash
-        tau = P["tau"]
+        # scene cuts: change faster, but never flash (the room layout already smooths its colours)
+        tau = 0.1 if (room and src == "screen") else P["tau"]
         if self.prev_target is not None and float(np.abs(tgt - self.prev_target).mean()) > 0.2:
             tau = tau / 3
         self.prev_target = tgt
@@ -219,23 +338,19 @@ class Cinema:
         a = 1 - math.exp(-dt / tau)
         self.cur += (tgt - self.cur) * a
         # the sound
-        speech = scene.get("speech", 0.0)
-        music = scene.get("music", 0.0)
-        fx = scene.get("fx", 0.0)
-        dialogue = speech > 0.3 and music < 0.25
-        self.calm += ((1.0 if dialogue else 0.0) - self.calm) * (1 - math.exp(-dt / 1.5))
-        lvl = 0.25 + 0.75 * bright
+        self.calm += ((1.0 if self.dialogue else 0.0) - self.calm) * (1 - math.exp(-dt / 1.5))
+        lvl = 0.3 + 0.7 * bright
         lvl *= 1.0 - 0.12 * self.calm                              # dialogue: steady and a little lower
-        if music > 0.3:
+        if self.mu_s > 0.35:
             lvl *= 0.92 + 0.25 * A.energy                          # the score swells the room
         if A.energy < 0.15 and not A.silence:
             lvl *= 0.75                                            # quiet scene
-        self.level += (lvl - self.level) * (1 - math.exp(-dt / 0.8))
+        self.level += (lvl - self.level) * (1 - math.exp(-dt / 1.2))
         img = self.cur * self.level
-        # music in the film: waves on the beat (only with a clear beat, never over dialogue)
-        beat_ok = music > 0.35 and not dialogue and A.locked and A.tconf > 0.3
+        # music in the film: waves on the beat (only with a clear, lasting beat, never over dialogue)
+        beat_ok = self.music_on and not self.dialogue and A.locked and A.tconf > 0.3
         if beat_ok and A.beat_tick:
-            amp = (0.25 + 0.5 * P["accent"]) * (1.0 if A.downbeat else 0.55) * min(1.0, music * 1.5)
+            amp = (0.2 + 0.4 * P["accent"]) * (1.0 if A.downbeat else 0.5) * min(1.0, self.mu_s * 1.5)
             self.waves.append((t, amp))
             self.waves = self.waves[-4:]
         if self.waves:
@@ -249,12 +364,10 @@ class Cinema:
                     boost = np.maximum(boost, np.exp(-0.5 * ((R.dc - age) / 0.12) ** 2) * amp * (1 - age))
             self.waves = keep
             img = img * (1 + boost[:, None]) + self.cur * (boost * 0.25)[:, None]
-        elif P["motion"] > 0 and music > 0.3 and not dialogue:       # music without a clear beat: a slow drift
-            sh = P["motion"] * 0.04 * math.sin(2 * math.pi * t * 0.05)
-            img = np.roll(img, int(sh * R.n), axis=0)
         # impacts: an explosion / gunshot / slam = one accent in the scene's own colour
-        hit = A.impact and A.impact_strength > 0.5 and (fx > 0.05 or A.impact_strength > 0.8 or music < 0.3)
-        if hit and t - self.last_hit > 0.35:
+        fx = scene.get("fx", 0.0)
+        hit = A.impact and A.impact_strength > 0.6 and (fx > 0.05 or A.impact_strength > 0.85) and not self.music_on
+        if hit and t - self.last_hit > 0.6:
             self.last_hit = t
             self.flash = P["accent"] * min(1.0, 0.5 + 0.6 * A.impact_strength)
             c = self.cur.mean(axis=0)
@@ -268,6 +381,7 @@ class Cinema:
                 ring = np.exp(-0.5 * ((R.dc - age / 0.7) / 0.06) ** 2) * (1 - age / 0.7) * self.flash
                 img = np.maximum(img, ring[:, None] * self.flash_col)
             self.flash *= math.exp(-dt / 0.22)
-        self.status = (f"{src}{' · dialogue' if self.calm > 0.5 else ''}"
-                       f"{' · music on the beat' if beat_ok else (' · score' if music > 0.3 else '')}")
+        what = "dialogue" if self.dialogue else ("music on the beat" if beat_ok else ("score" if self.mu_s > 0.35 else ""))
+        self.status = f"{src}{' (' + ('room' if room else 'around the screen') + ')' if src == 'screen' else ''}" \
+                      f"{' · ' + what if what else ''}"
         return np.clip(img, 0, 1)

@@ -99,7 +99,8 @@ button:hover{border-color:#3a4150}
     <label>mode <select id="modesel"><option value="auto">auto</option><option value="music">music</option><option value="cinema">cinema (films, videos, games)</option></select></label>
     <label>cinema <select id="inten"><option value="subtle">subtle (films)</option><option value="normal" selected>normal</option><option value="intense">intense (games)</option></select></label>
     <label><input type="checkbox" id="screen" checked> screen colours</label>
-    <label><input type="checkbox" id="flip"> flip left/right</label>
+    <label>layout <select id="layout"><option value="room">strip in the room</option><option value="screen">strip around the screen</option></select></label>
+    <label><input type="checkbox" id="flip"> flip</label>
     <label>LEDs <select id="leds"><option>30</option><option>45</option><option>60</option><option>90</option><option>120</option><option selected>115</option></select></label>
     <label>brightness <input type="range" id="bright" min="0" max="1" step="0.05" value="1"></label>
     <label>sync offset <input type="range" id="la" min="-0.15" max="0.25" step="0.01" value="0.04"><span id="lav" class="muted">+40 ms</span></label>
@@ -205,7 +206,8 @@ function ui(m){
     $("modewhy").textContent = m.mode.active === "cinema" ? `${dd.cine || ""}${m.mode.screen_err ? " · " + m.mode.screen_err : ""} · ${dd.intensity}` : (m.mode.why || ""); }
   if (m.plan){ const p = m.plan; $("plan").textContent = p.at != null ? `synced ${Math.floor(p.at/60)}:${String(Math.floor(p.at%60)).padStart(2,"0")}` : (p.status.startsWith("known") ? "matching…" : "live show");
     $("plan2").textContent = p.next_drop != null ? `next drop in ${p.next_drop.toFixed(0)} s` : (m.known != null ? `${m.known} songs recorded` : p.status); }
-  if (dd.bright != null && document.activeElement !== $("bright")) $("bright").value = dd.bright;   // same on every open bench
+  if (dd.bright != null && document.activeElement !== $("bright")) $("bright").value = dd.bright;
+  if (dd.layout && document.activeElement !== $("layout")) $("layout").value = dd.layout;   // same on every open bench
   $("amps").textContent = dd.amps.toFixed(2)+" A"; $("cpu").textContent = `cpu ${m.cpu}% of real time`;
 }
 
@@ -240,6 +242,7 @@ $("modesel").onchange = e => api({mode: e.target.value});
 $("inten").onchange = e => api({intensity: e.target.value});
 $("screen").onchange = e => api({screen: e.target.checked});
 $("flip").onchange = e => api({flip: e.target.checked});
+$("layout").onchange = e => api({layout: e.target.value});
 $("abtoggle").onclick = () => api({ab: !abOn});
 const vote = v => fetch("/api", {method:"POST", body: JSON.stringify({vote: v})}).then(r => r.text()).then(t => toast(t === "saved" ? "picked, next one…" : t));
 $("v1").onclick = () => vote(1); $("v2").onclick = () => vote(2); $("v0").onclick = () => vote(0);

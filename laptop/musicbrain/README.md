@@ -59,8 +59,10 @@ The director works like a club lighting operator (LJ):
 - **music**: the show above. Songs you have played before (and that `truth.py` has analysed) get a
   pre-planned show: `songmap.py` matches the live audio against the recording and the director gets the
   real beats, sections and the time to the next drop.
-- **cinema**: films, YouTube, games. The strip takes the screen's colours; dialogue keeps it calm, a score
-  swells it, explosions and hits send one accent in the scene's colour. Subtle / normal / intense.
+- **cinema**: films, YouTube, games. The strip takes the scene's main colours (room layout) or the colour
+  of each screen edge (strip around the screen); dialogue keeps it calm, a score swells it, music with a
+  beat sends soft waves, explosions and hits send one accent in the scene's colour. Subtle / normal /
+  intense. Stays on while a video site or player is in front, even when the film has music.
 - **auto** (default): music while Spotify plays or the sound is music; cinema when it hears speech or film
   sounds for a few seconds.
 

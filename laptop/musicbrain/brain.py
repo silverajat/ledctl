@@ -533,6 +533,8 @@ def make_handler(eng):
                     eng.screen_on = bool(body["screen"])
                 if "flip" in body:
                     D.cine.flip = bool(body["flip"])
+                if body.get("layout") in ("room", "screen"):
+                    D.cine.layout = body["layout"]
                 return self._send(200, "ok")
             if self.path == "/feedback":
                 eng.feedback(body.get("kind", "note"), str(body.get("note", ""))[:500])

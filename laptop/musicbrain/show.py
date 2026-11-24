@@ -805,6 +805,6 @@ class Director:
         return {"look": self.look, "palette": self.palette.name, "tier": self.tier, "gain": round(self.gain, 2),
                 "family": self.family, "amps": round(self.current_a, 2), "lock": self.lock, "root": self.root,
                 "style": self.feel["style"], "mode": self.mode, "cine": self.cine.status,
-                "intensity": self.cine.intensity, "bright": round(self.brightness, 2),
+                "intensity": self.cine.intensity, "bright": round(self.brightness, 2), "layout": self.cine.layout,
                 "blackout": round(self.blackout, 2),
                 "pal_cols": [list((c * 255).astype(int)) for c in self.palette.cols]}

@@ -38,9 +38,10 @@ Runtime) · Android (Java) · OpenSCAD
   in the key picks which colour leads, so the same song always gets the same colours and they move with the
   chords. No white: grey and white are never sent to the strip.
 - **Cinema mode for films, YouTube and games.** It switches automatically when it hears speech or film
-  sounds. The strip takes the colours of the laptop screen (Ambilight-style, black bars cut, white turned
-  into a dim tint), dialogue keeps it calm, the score swells it, and explosions send one accent in the
-  scene's own colour.
+  sounds, and stays there while a video site or player is in front. The strip takes the scene's main
+  colours from the laptop screen, the way Hue Sync lights a room (or edge by edge, Ambilight-style, for
+  a strip around the screen); white becomes a dim tint. Dialogue keeps it calm, the score swells it, music
+  with a beat sends waves on the beat, and explosions send one accent in the scene's own colour.
 - **Learns your taste.** An A/B mode shows two versions of the same moment side by side. Your picks are
   saved per genre and the director follows them.
 - **Runs without the laptop.** The phone app (Bluetooth) and the board's own modes (solid, breathe, party,
@@ -126,9 +127,11 @@ This file is also the reference model for moving the effect engine into the FPGA
 spectral shape at every offset (one FFT), locks after two agreeing matches (about 10 s, ~3 ms error),
 and lays the song's real beat grid, sections and upcoming drops over the live analysis.
 
-**Cinema** (`cinema.py`): screen capture through GDI (no extra installs), colour per strip position from
-the bright parts of the picture, de-whitening, cut-aware smoothing, and sound-driven calm / swell /
-impact accents, with subtle, normal and intense settings.
+**Cinema** (`cinema.py`): screen capture through GDI (no extra installs); in the room layout the scene's
+2-3 main colours from a saturation-weighted hue histogram, eased around the colour wheel (never through
+grey); in the screen layout one colour per screen edge; cut-aware smoothing; sound states (dialogue,
+score, music on the beat) smoothed over seconds with hysteresis; impact accents; subtle, normal and
+intense settings; a black (DRM-protected) picture falls back to mood colours.
 
 **Teaching it:**
 - **Light bench:** a web page with a virtual strip, a 10 s timeline of what the brain heard, and
