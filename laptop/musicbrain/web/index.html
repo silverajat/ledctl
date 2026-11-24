@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ledctl light bench</title>
+<style>
+:root{
+  --bg:#08090c; --panel:#111319; --line:#232733; --fg:#e8eaf0; --muted:#8a90a2;
+  --accent:#7cf0c8; --warn:#ffb648; --bad:#ff5c7a;
+  --mono:ui-monospace,"Cascadia Mono",Consolas,monospace;
+  --sans:system-ui,"Segoe UI",sans-serif;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 var(--sans);padding:16px}
+.wrap{max-width:1200px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
+header{display:flex;flex-wrap:wrap;gap:8px 18px;align-items:baseline}
+h1{font-size:17px;margin:0;letter-spacing:.02em}
+.song{color:var(--accent);font-weight:600}
+.muted{color:var(--muted)}
+.stage{position:relative;background:#000;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+#strip,#strip2{display:block;width:100%;height:220px}
+.tag{position:absolute;left:12px;top:8px;font:600 15px var(--mono);color:var(--muted)}
+.abbar[hidden]{display:none}
+.abbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;background:#16202a;border:1px solid #2e6b55;border-radius:10px;padding:12px}
+.abbar b{color:var(--accent)}
+body.ab #strip,body.ab #strip2{height:150px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px;min-width:0}
+.k{font:11px var(--mono);text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+.v{font:600 22px var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.v.small{font-size:16px}
+.beats{display:flex;gap:6px;margin-top:6px}
+.beats i{width:18px;height:18px;border-radius:50%;background:#262a36;transition:background .05s}
+.beats i.on{background:var(--accent)}
+.beats i.one.on{background:#fff}
+.bar{height:8px;background:#232733;border-radius:4px;overflow:hidden;margin-top:6px}
+.bar>b{display:block;height:100%;background:var(--accent);width:0}
+.bar.warn>b{background:var(--warn)}
+.sw{display:flex;gap:4px;margin-top:6px}
+.sw i{flex:1;height:14px;border-radius:3px}
+#tl{display:block;width:100%;height:170px;background:var(--panel);border:1px solid var(--line);border-radius:10px}
+.controls{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px}
+.controls label{display:flex;gap:8px;align-items:center;color:var(--muted);font-size:13px}
+select,input[type=text],button{font:inherit;color:var(--fg);background:#1a1d26;border:1px solid var(--line);border-radius:7px;padding:6px 10px}
+input[type=range]{width:110px;accent-color:var(--accent)}
+button{cursor:pointer}
+button:hover{border-color:#3a4150}
+.fb{display:flex;flex-wrap:wrap;gap:8px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px}
+.fb input{flex:1;min-width:180px}
+.good{border-color:#2e6b55;color:#9ff5d6}
+.badb{border-color:#7a2a3a;color:#ffb3c2}
+#toast{position:fixed;right:16px;bottom:16px;background:#1d2230;border:1px solid var(--line);padding:10px 14px;border-radius:8px;opacity:0;transition:opacity .3s}
+#log{font:12px var(--mono);color:var(--muted);max-height:120px;overflow:auto;white-space:pre-wrap}
+.status-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--bad);margin-right:6px}
+.status-dot.ok{background:var(--accent)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1><span class="status-dot" id="dot"></span>ledctl light bench</h1>
+    <span class="song" id="song">waiting for music…</span>
+    <span class="muted" id="src"></span>
+    <span class="muted" id="board"></span>
+  </header>
+
+  <div class="stage" id="stage1"><span class="tag" id="tag1"></span><canvas id="strip"></canvas></div>
+  <div class="stage" id="stage2" hidden><span class="tag">2</span><canvas id="strip2"></canvas></div>
+  <div class="abbar" id="abbar" hidden>
+    <span>Which looks better? <b id="qwhat">…</b> is different</span>
+    <button class="good" id="v1">1 is better (1)</button>
+    <button class="good" id="v2">2 is better (2)</button>
+    <button id="v0">neither (0)</button>
+    <span class="muted" id="votes"></span>
+  </div>
+
+  <div class="grid">
+    <div class="card"><div class="k">tempo</div><div class="v" id="bpm">—</div>
+      <div class="beats"><i class="one"></i><i></i><i></i><i></i></div></div>
+    <div class="card"><div class="k">look</div><div class="v small" id="look">—</div><div class="muted" id="tier"></div></div>
+    <div class="card"><div class="k">genre · palette</div><div class="v small" id="pal">—</div><div class="sw" id="sw"></div></div>
+    <div class="card"><div class="k">key · voice</div><div class="v small" id="key">—</div><div class="muted" id="sec"></div></div>
+    <div class="card"><div class="k">intensity</div><div class="v small" id="int">—</div><div class="bar"><b id="intb"></b></div></div>
+    <div class="card"><div class="k">build-up</div><div class="v small" id="build">—</div><div class="bar warn"><b id="buildb"></b></div></div>
+    <div class="card"><div class="k">strip power</div><div class="v small" id="amps">—</div><div class="muted" id="cpu"></div></div>
+  </div>
+
+  <canvas id="tl"></canvas>
+
+  <div class="controls">
+    <label>look <select id="lock">
+      <option value="auto">auto (director)</option>
+      <option>ambient</option><option>bassline</option><option>groove</option><option>chase</option>
+      <option>peak</option><option>punch</option><option>swell</option><option>build</option><option>breakdown</option></select></label>
+    <label>LEDs <select id="leds"><option>30</option><option>45</option><option>60</option><option>90</option><option>120</option><option selected>115</option></select></label>
+    <label>brightness <input type="range" id="bright" min="0.1" max="1" step="0.05" value="1"></label>
+    <label>sync offset <input type="range" id="la" min="-0.15" max="0.25" step="0.01" value="0.04"><span id="lav" class="muted">+40 ms</span></label>
+    <label>view <select id="view"><option value="wall">strip + wall glow</option><option value="dots">LEDs only</option></select></label>
+    <button id="newpal">new colours</button>
+    <button id="abtoggle">A/B taste test: off</button>
+  </div>
+
+  <div class="fb">
+    <input type="text" id="note" placeholder="what's off? e.g. 'missed the drop', 'too flashy in the verse', 'colours wrong for this song'">
+    <button class="good" id="good">Looks right (G)</button>
+    <button class="badb" id="bad">Looks wrong (B)</button>
+  </div>
+  <div id="log"></div>
+</div>
+<div id="toast"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const cv = $("strip"), ctx0 = cv.getContext("2d");
+const cv2 = $("strip2"), ctx2 = cv2.getContext("2d");
+let ctx = ctx0, frame2 = null, abOn = false;
+const tl = $("tl"), tctx = tl.getContext("2d");
+let frame = new Uint8Array(180), n = 60, last = null, tlData = [], events = [];
+const beatsEl = [...document.querySelectorAll(".beats i")];
+
+function fit(c){ const r = c.getBoundingClientRect(), d = devicePixelRatio || 1;
+  if (c.width !== Math.round(r.width*d) || c.height !== Math.round(r.height*d)) { c.width = Math.round(r.width*d); c.height = Math.round(r.height*d); } return d; }
+
+function drawStrip(){ ctx = ctx0; drawOne(cv, frame); if (abOn && frame2){ ctx = ctx2; drawOne(cv2, frame2); } }
+function drawOne(cv, frame){
+  const d = fit(cv), W = cv.width, H = cv.height, n = frame.length/3;
+  ctx.globalCompositeOperation = "source-over";
+  ctx.fillStyle = "#000"; ctx.fillRect(0,0,W,H);
+  const pad = 24*d, y = H*0.38, step = (W - 2*pad) / Math.max(n-1,1);
+  const wall = $("view").value === "wall";
+  ctx.globalCompositeOperation = "lighter";
+  for (let i=0;i<n;i++){
+    const r=frame[3*i], g=frame[3*i+1], b=frame[3*i+2], x = pad + i*step;
+    if (r+g+b < 3) continue;
+    if (wall){
+      const R = step*3.2 + 30*d;
+      const gr = ctx.createRadialGradient(x, y+H*0.18, 0, x, y+H*0.18, R);
+      gr.addColorStop(0, `rgba(${r},${g},${b},0.30)`); gr.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.fillStyle = gr; ctx.fillRect(x-R, y+H*0.18-R, 2*R, 2*R);
+    }
+    const R2 = step*1.1 + 4*d;
+    const g2 = ctx.createRadialGradient(x, y, 0, x, y, R2);
+    g2.addColorStop(0, `rgba(${r},${g},${b},0.75)`); g2.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = g2; ctx.fillRect(x-R2, y-R2, 2*R2, 2*R2);
+  }
+  ctx.globalCompositeOperation = "source-over";
+  const s = Math.max(2*d, Math.min(step*0.42, 7*d));
+  for (let i=0;i<n;i++){
+    const r=frame[3*i], g=frame[3*i+1], b=frame[3*i+2], x = pad + i*step;
+    const m = Math.max(r,g,b);
+    ctx.fillStyle = m < 3 ? "#1a1c22" : `rgb(${r},${g},${b})`;   // the LED's real colour, no whitening
+    ctx.fillRect(x-s/2, y-s/2, s, s);
+  }
+}
+
+function drawTimeline(){
+  const d = fit(tl), W = tl.width, H = tl.height;
+  tctx.fillStyle = "#111319"; tctx.fillRect(0,0,W,H);
+  if (!tlData.length) return;
+  const tnow = tlData[tlData.length-1][0], span = 10, x = t => W - (tnow - t)/span*W;
+  const lane = (row) => H - 18*d - row*10*d;
+  tctx.font = `${10*d}px ui-monospace,monospace`;
+  // beats and downbeats
+  for (const p of tlData){ if (p[6]){ tctx.fillStyle = p[7] ? "#4b5266" : "#252a36"; tctx.fillRect(x(p[0]), 0, p[7]?2*d:1*d, H); } }
+  // energy + intensity + build
+  const line = (idx, col, w) => { tctx.strokeStyle = col; tctx.lineWidth = w*d; tctx.beginPath();
+    tlData.forEach((p,i) => { const yy = 8*d + (1-p[idx])*(H-60*d); i? tctx.lineTo(x(p[0]),yy) : tctx.moveTo(x(p[0]),yy); }); tctx.stroke(); };
+  line(1, "#3d7cff", 1.5); line(2, "#7cf0c8", 2); line(8, "#ffb648", 1.5);
+  // drum lanes
+  const lanes = [[3,"#ff5c7a","kick"],[4,"#ffffff","snare"],[5,"#c9a0ff","hat"]];
+  lanes.forEach(([idx,col,name],k) => { tctx.fillStyle = "#5b6175"; tctx.fillText(name, 4*d, lane(k)+3*d);
+    tctx.fillStyle = col; for (const p of tlData) if (p[idx]) tctx.fillRect(x(p[0])-1.5*d, lane(k)-3*d, 3*d, 6*d); });
+  // events
+  tctx.fillStyle = "#ffb648";
+  for (const e of events){ if (tnow - e.t > span) continue; const xx = x(e.t);
+    tctx.fillRect(xx, 0, 1*d, H-50*d); tctx.fillText(e.k === "look" ? e.v : e.k === "palette" ? "◐ "+e.v : e.k.toUpperCase(), xx+3*d, 12*d + (events.indexOf(e)%3)*12*d); }
+  tctx.fillStyle = "#5b6175"; tctx.fillText("energy", W-160*d, H-4*d); tctx.fillStyle="#7cf0c8"; tctx.fillText("intensity", W-110*d, H-4*d);
+  tctx.fillStyle="#ffb648"; tctx.fillText("build", W-48*d, H-4*d);
+}
+
+function ui(m){
+  const a = m.a, dd = m.d;
+  $("song").textContent = m.song || (a.silent ? "waiting for music…" : "playing");
+  $("src").textContent = `${m.src} · ${m.sr} Hz`;
+  $("board").textContent = m.board ? `strip: ${m.board.status}${m.board.fps ? " · " + m.board.fps + " fps" : ""}` : "";
+  $("bpm").textContent = a.silent ? "—" : `${a.bpm.toFixed(0)}${a.locked ? "" : "?"}`;
+  beatsEl.forEach((b,i) => b.classList.toggle("on", !a.silent && a.locked && i === a.bb && a.phase < 0.5));
+  $("look").textContent = dd.look + (dd.lock !== "auto" ? " (locked)" : "");
+  $("tier").textContent = `tier ${dd.tier} · section ${a.sec}`;
+  $("pal").textContent = `${(m.g && m.g.glabel) || "?"} · ${dd.palette}`;
+  $("pal").title = $("pal").textContent;
+  $("sw").innerHTML = dd.pal_cols.map(c => `<i style="background:rgb(${c.join(",")})"></i>`).join("");
+  $("key").textContent = a.key; $("sec").textContent = `voice ${a.vox} · pan ${a.pan < 0.4 ? "L" : a.pan > 0.6 ? "R" : "C"} · singing ${m.g && m.g.sing != null ? m.g.sing : "?"}`;
+  $("int").textContent = a.int.toFixed(2); $("intb").style.width = (a.int*100)+"%";
+  $("build").textContent = a.build.toFixed(2); $("buildb").style.width = (a.build*100)+"%";
+  $("amps").textContent = dd.amps.toFixed(2)+" A"; $("cpu").textContent = `cpu ${m.cpu}% of real time`;
+}
+
+function connect(){
+  const es = new EventSource("/stream");
+  es.onopen = () => $("dot").classList.add("ok");
+  es.onerror = () => { $("dot").classList.remove("ok"); };
+  es.onmessage = ev => {
+    const m = JSON.parse(ev.data);
+    const bin = atob(m.f); const f = new Uint8Array(bin.length); for (let i=0;i<bin.length;i++) f[i]=bin.charCodeAt(i);
+    frame = f; n = f.length/3;
+    if (m.f2){ const b2 = atob(m.f2); const g = new Uint8Array(b2.length); for (let i=0;i<b2.length;i++) g[i]=b2.charCodeAt(i); frame2 = g; } else frame2 = null;
+    abOn = m.ab; document.body.classList.toggle("ab", abOn);
+    $("stage2").hidden = !abOn; $("abbar").hidden = !abOn; $("tag1").textContent = abOn ? "1" : "";
+    $("abtoggle").textContent = "A/B taste test: " + (abOn ? "on" : "off");
+    $("qwhat").textContent = m.q ? m.q.what : "waiting for music"; $("votes").textContent = `${m.votes} picks so far`;
+    if (m.tl && m.tl.length){ tlData.push(...m.tl); const tn = tlData[tlData.length-1][0]; while (tlData.length && tn - tlData[0][0] > 10.5) tlData.shift(); }
+    if (m.ev && m.ev.length){ events.push(...m.ev); if (events.length > 40) events = events.slice(-40);
+      m.ev.forEach(e => { $("log").textContent = `${e.t.toFixed(1)}s  ${e.k}  ${e.v}\n` + $("log").textContent.slice(0,3000); }); }
+    last = m;
+  };
+}
+function loop(){ drawStrip(); drawTimeline(); if (last) ui(last); requestAnimationFrame(loop); }
+
+const api = body => fetch("/api", {method:"POST", body: JSON.stringify(body)});
+$("lock").onchange = e => api({lock: e.target.value});
+$("leds").onchange = e => api({leds: +e.target.value});
+$("bright").oninput = e => api({brightness: +e.target.value});
+$("la").oninput = e => { $("lav").textContent = `${e.target.value>=0?"+":""}${Math.round(e.target.value*1000)} ms`; api({lookahead: +e.target.value}); };
+$("newpal").onclick = () => api({newpal: 1});
+$("abtoggle").onclick = () => api({ab: !abOn});
+const vote = v => fetch("/api", {method:"POST", body: JSON.stringify({vote: v})}).then(r => r.text()).then(t => toast(t === "saved" ? "picked, next one…" : t));
+$("v1").onclick = () => vote(1); $("v2").onclick = () => vote(2); $("v0").onclick = () => vote(0);
+function toast(t){ const el = $("toast"); el.textContent = t; el.style.opacity = 1; setTimeout(()=>el.style.opacity=0, 1600); }
+function feedback(kind){ fetch("/feedback", {method:"POST", body: JSON.stringify({kind, note: $("note").value})})
+  .then(()=>{ toast(kind==="good" ? "saved: looks right" : "saved: looks wrong — I'll check this moment"); $("note").value=""; }); }
+$("good").onclick = () => feedback("good"); $("bad").onclick = () => feedback("bad");
+document.addEventListener("keydown", e => { if (e.target.tagName === "INPUT") return;
+  if (e.key === "g" || e.key === "G") feedback("good"); if (e.key === "b" || e.key === "B") feedback("bad");
+  if (abOn && (e.key === "1" || e.key === "2" || e.key === "0")) vote(+e.key); });
+connect(); loop();
+</script>
+</body>
+</html>

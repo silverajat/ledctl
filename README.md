@@ -1,0 +1,194 @@
+# ledctl: an FPGA music-sync LED controller
+
+A board I designed from scratch that turns music into a light show on a 115-LED addressable strip.
+The laptop listens to what's playing (Spotify or anything else), works out the beat, the bars, the drums,
+the genre and where the song is going (build-up, drop, breakdown), and a lighting "director" picks looks the
+way a club lighting operator would. Every frame goes to the board, and the FPGA drives the strip.
+
+It spans the whole stack: a 4-layer PCB, FPGA logic, ESP32 firmware, real-time audio analysis and a phone app.
+
+**Built with:** KiCad · Verilog (Yosys, nextpnr, Icarus) · ESP32-C3 (C++, Arduino) · Python (NumPy, ONNX
+Runtime) · Android (Java) · OpenSCAD
+
+![The light bench during a drop](docs/images/bench.png)
+
+![The ledctl v1 board](docs/images/ledctl_v1_top.png)
+
+*The ledctl v1 board: 100 × 62 mm, 4 layers, assembled by JLCPCB.*
+
+---
+
+## What it does
+
+- **Follows the music, not just the volume.** Kick drums send pulses along the strip, snares make bursts,
+  hi-hats sparkle, and the singer's voice is a soft glow placed where the voice sits in the stereo mix.
+  Movement is locked to the beat clock, and looks only change on the first beat of a bar.
+- **Knows the shape of a song.** It detects build-ups (the strip speeds up and fills in), goes dark in the
+  silence right before a drop, then hits the big look exactly on the drop.
+- **Lights each genre differently.** A neural network ([YAMNet](https://tfhub.dev/google/yamnet/1)) tells
+  R&B and soul (deep blues and purples, smooth swells) from hip-hop, EDM, pop and rock, and sets the colour
+  family and how punchy the show is.
+- **Learns your taste.** An A/B mode shows two versions of the same moment side by side. Your picks are
+  saved per genre and the director follows them.
+- **Runs without the laptop.** The phone app (Bluetooth) and the board's own modes (solid, breathe, party,
+  study timer, ...) work on their own.
+
+## How it fits together
+
+```mermaid
+flowchart LR
+    subgraph Laptop
+        A[System audio<br/>WASAPI loopback] --> B[Analysis<br/>beats, bars, drums,<br/>key, sections]
+        Y[YAMNet<br/>genre / mood] --> D
+        B --> D[Director<br/>+ effect engine]
+        D --> W[Light bench<br/>web page]
+    end
+    D -- "frames over USB<br/>(checksummed, 60 fps)" --> E
+    P[Phone app] -- Bluetooth LE --> E
+    subgraph Board
+        E[ESP32-C3<br/>BLE / Wi-Fi / USB] -- "1 Mbaud UART" --> F[Gowin GW2AR-18 FPGA]
+        E -- "JTAG: loads the FPGA<br/>at every power-up" --> F
+        F -- "WS2812B data" --> S[115-LED strip]
+        I[INA219<br/>current sensor] --> E
+    end
+```
+
+| Part | Job |
+|---|---|
+| **Gowin GW2AR-18 FPGA** | WS2812B driver, double-buffered frame memory, command parser, audio front end (I2S mic, filter bank, beat detector) |
+| **ESP32-C3** | Configures the FPGA over JTAG at boot, Bluetooth LE and Wi-Fi control, USB link to the laptop, current limiting |
+| **INA219** | Measures the strip's current; the firmware scales frames down if it goes over the limit |
+| **Laptop (Python)** | The music brain: analysis, genre network, director, light bench, scoring and tuning tools |
+
+## The hardware
+
+- 4-layer, 100 × 62 mm board, designed in KiCad. ERC/DRC clean.
+- Gowin GW2AR-LV18 (QN88), ESP32-C3-MINI-1, 27 MHz clock, 2 MB SPI flash, INA219 current sensor,
+  I2S MEMS mic + analog mic, three MOSFET strip outputs, USB-C with ESD protection and a 2.6 A fuse.
+- A socket for a [Tiny Tapeout](https://tinytapeout.com) chip, for the phase-2 plan of designing my own
+  analog front end in silicon.
+- Fab files (Gerbers, BOM, pick-and-place) in [`hardware/fab`](hardware/fab), and a 3D-printable
+  enclosure in [`hardware/enclosure`](hardware/enclosure).
+
+<img src="docs/images/assembly.png" alt="The board in its 3D-printed enclosure" width="520">
+
+## The FPGA design ([`fpga/v2`](fpga/v2))
+
+- **WS2812B driver.** 800 kHz, GRB, cycle-exact at 27 MHz (0.41 / 0.81 µs high times, 1.26 µs bits,
+  300 µs latch). Output straight from an FPGA pin.
+- **Frame packets** from the ESP32 at 1 Mbaud: `0xA7, n_lo, n_hi, n × RGB`, written into one bank of a
+  double-buffered block RAM while the other bank is shown. The parser resyncs after a gap.
+- **Fallback.** With no frames for 1 s the strip shows the board's own colour, so the phone modes keep
+  working.
+- **UART input with a glitch filter** (the line only changes after 5 equal samples) against crosstalk from
+  the strip pins next to it.
+- **Diagnostics in the telemetry:** packets received and strip refreshes sent. Those two counters found the
+  last bring-up bug (below).
+- The v1 audio front end is still in there: I2S receiver, IIR 3-band filter bank with log envelopes,
+  beat detector, telemetry to the ESP32 every 10 ms.
+- Open toolchain only: Yosys, nextpnr-himbaechel, gowin_pack. Testbenches in Icarus Verilog
+  (`tb_ws.v`, `tb_boot.v`, `tb_glitch.v`). About 28% of the FPGA's LUTs.
+
+## The music brain ([`laptop/musicbrain`](laptop/musicbrain))
+
+**Analysis** (`analysis.py`, all causal, ~10 ms hops):
+- 40 mel bands, each normalised to its own recent range
+- kick / snare / hi-hat detectors on per-band spectral flux with adaptive thresholds
+- tempo from an autocorrelation with harmonic scoring and a genre-aware prior; beat phase from a PLL on a
+  continuous beat position, so corrections never add or drop beats
+- bar lines from chord changes, bass-note changes and kicks, minus backbeat snares
+- key (Krumhansl), lead pitch, voice level and stereo position
+- sections from novelty spikes on downbeats; build-ups from steady rises with the bass held back;
+  drops from the kick and full bass returning
+
+**Director and effects** (`show.py`): tiers of looks (ambient, bassline, groove, chase, swell, punch,
+peak, build, breakdown) chosen from intensity and song events, colour families per genre, auto-exposure,
+hue-preserving limits (no washing out to white), and a power limit for the strip.
+This file is also the reference model for moving the effect engine into the FPGA.
+
+**Teaching it:**
+- **Light bench:** a web page with a virtual strip, a 10 s timeline of what the brain heard, and
+  "looks right / looks wrong" buttons that save the last 10 s of state.
+- **A/B taste test:** two strips, one thing different, blind left/right; picks are saved per genre.
+- **Scoring:** `truth.py` works out reference beats and bar lines offline with
+  [Beat This!](https://github.com/CPJKU/beat_this) and sections from self-similarity; `tools/score.py`
+  replays recordings through the live brain and scores it, and `tools/tune.py` searches its settings.
+
+![A build-up and drop, drawn as LEDs over time](docs/images/show_builddrop.png)
+
+*A build-up and drop on a test track, drawn as the strip over time (left to right = 40 s → 70 s):
+the chase speeds up and fills in from the ends, the strip goes dark for the silence before the drop,
+then the peak look hits on the beat.*
+
+## Bring-up: what broke and how I fixed it
+
+The full log is in [`docs/bringup.md`](docs/bringup.md). The short version:
+
+1. **The FPGA's flash couldn't be written** through the programmer. I wrote a JTAG loader for the ESP32
+   from Gowin's programming spec, so the board loads the FPGA itself at every power-up.
+2. **Music mode didn't react:** an unsigned subtraction bug in the FPGA's loudness filter.
+3. **The room fan triggered fake beats:** a gated Kalman filter that learns each band's noise floor.
+4. **Spotify shut down its audio-analysis API**, so the laptop analyses its own audio output instead.
+5. **The first LED died** during wiring (a mixed-up ground and data line), freezing the whole strip.
+   Lesson: ground first, data last.
+6. **Strip signal vs. serial link.** The MOSFET output was too slow for the strip at normal drive
+   strength, and at high drive its edges corrupted the ESP32 → FPGA link on the neighbouring pin. Moved
+   the strip to a direct FPGA pin and added the counters that proved it.
+7. **Random colours on the strip but not on screen:** the ESP32's USB receive buffer overflowed at
+   18 KB/s. A bigger buffer plus a checksum on every frame fixed it.
+
+## Status and next steps
+
+**Working:** the board, FPGA strip driver, ESP32 firmware, phone app, laptop music brain over USB,
+light bench, genre network, A/B taste learning.
+
+**Next:**
+- Run the scoring and tuning on a set of recorded songs
+- Move the effect engine from Python into the FPGA (`show.py` is the reference model), so the laptop only
+  sends a few features per frame
+- Firmware updates over Bluetooth (move the FPGA image into its own flash partition first)
+- A small int8 beat-detection network on the FPGA for a stand-alone, mic-only mode
+
+## Repository layout
+
+```
+hardware/   KiCad project, fab files, enclosure
+fpga/       v1 (audio front end) and v2 (strip driver) Verilog, constraints, testbenches
+firmware/   ESP32-C3 Arduino sketch, FPGA bitstream converter
+android/    phone app (built without Gradle)
+laptop/     musicbrain: the laptop music brain (Python)
+tools/      DSP tuning simulations
+docs/       bring-up log, images
+```
+
+## Building
+
+**FPGA** (needs `yowasp-yosys`, `yowasp-nextpnr-himbaechel`, `gowin_pack` from Apicula):
+```sh
+cd fpga/v2 && ./build.sh            # -> ledctl_v2.fs
+```
+
+**Firmware** (Arduino core for ESP32 3.3.x, board "ESP32C3 Dev Module", USB CDC on boot, partition
+scheme "Huge APP"):
+```sh
+python firmware/tools/fs2h.py fpga/v2/ledctl_v2.fs firmware/ledctl/fpga_bits.h   # embed the bitstream
+arduino-cli compile --fqbn esp32:esp32:esp32c3:CDCOnBoot=cdc,PartitionScheme=huge_app firmware/ledctl
+```
+
+**Music brain** (Windows, Python 3.13):
+```sh
+cd laptop/musicbrain
+pip install numpy pyaudiowpatch onnxruntime pyserial bleak
+python brain.py            # opens the light bench at http://localhost:8766
+```
+
+**Wiring the strip:** strip GND → J2 pin 2, strip 5V → J4 pin 1, strip DIN → J3 pin 3 (FPGA pin 48).
+Connect ground first.
+
+## Credits and licences
+
+My own work is under the MIT licence ([LICENSE](LICENSE)).
+`laptop/musicbrain/ml/yamnet.onnx` is Google's YAMNet, converted to ONNX, under the Apache 2.0 licence.
+Beat This! (CPJKU) is used offline for reference beats and is not included.
+
+Rajat Gupta, NUS Electrical Engineering

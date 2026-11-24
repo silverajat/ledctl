@@ -1,0 +1,20 @@
+# build outputs
+fpga/**/top.json
+fpga/**/pnr.json
+fpga/**/*.fs
+fpga/**/build.log
+fpga/**/tb?
+fpga/**/tb??
+firmware/ledctl/fpga_bits.h
+firmware/ledctl/build/
+android/build/
+android/debug.keystore
+__pycache__/
+*.pyc
+
+# personal data: never commit
+laptop/musicbrain/recordings/
+laptop/musicbrain/sessions/
+laptop/musicbrain/prefs.json
+laptop/musicbrain/tuned.json
+laptop/musicbrain/songs/

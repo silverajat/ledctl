@@ -1,0 +1,138 @@
+(footprint "MEMSensing_LGA-6_2.95x3.76mm"
+	(version 20241229)
+	(generator "ledctl_gen")
+	(generator_version "9.0")
+	(layer "F.Cu")
+	(descr "MEMSensing MSM381A3729Z9E-C analog bottom-port MEMS mic, land per datasheet DS-024 p4; port NPTH enlarged 0.4->0.5mm for JLCPCB min NPTH, GND ring ID 0.92")
+	(property "Reference" "REF**"
+		(at 0 -3.4 0)
+		(layer "F.SilkS")
+		(uuid "c82007fb-b1ef-590c-a68f-915dc904a664")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(property "Value" "MSM381A3729Z9E-C"
+		(at 0 2.6 0)
+		(layer "F.Fab")
+		(uuid "9632903f-0c02-5a46-8cfe-6f49ba80bc9b")
+		(effects
+			(font
+				(size 0.6 0.6)
+				(thickness 0.15)
+			)
+		)
+	)
+	(pad "1" smd circle
+		(at -0.97 -2.1)
+		(size 0.72 0.72)
+		(layers "F.Cu" "F.Paste" "F.Mask")
+		(uuid "e3c57cca-e2d9-5203-a32f-46b72fac9582")
+	)
+	(pad "5" smd circle
+		(at 0 -2.1)
+		(size 0.61 0.61)
+		(layers "F.Cu" "F.Paste" "F.Mask")
+		(uuid "ce515d74-c9be-5e45-baca-9eff03ba8021")
+	)
+	(pad "4" smd circle
+		(at 0.97 -2.1)
+		(size 0.72 0.72)
+		(layers "F.Cu" "F.Paste" "F.Mask")
+		(uuid "36a25d1d-19af-56ca-97b7-908e0600aa6d")
+	)
+	(pad "2" smd circle
+		(at -1.02 0.63)
+		(size 0.56 0.56)
+		(layers "F.Cu" "F.Paste" "F.Mask")
+		(uuid "a1d6aa3b-72db-5e9b-8f70-a2a4c8a808ff")
+	)
+	(pad "3" smd circle
+		(at 1.02 0.63)
+		(size 0.56 0.56)
+		(layers "F.Cu" "F.Paste" "F.Mask")
+		(uuid "f2e88911-aecc-5bd8-bccd-652339abb519")
+	)
+	(pad "6" smd custom
+		(at 0.535 0)
+		(size 0.15 0.15)
+		(layers "F.Cu" "F.Paste" "F.Mask")
+		(options
+			(clearance outline)
+			(anchor circle)
+		)
+		(primitives
+			(gr_circle
+				(center -0.535 0)
+				(end 0 0)
+				(width 0.15)
+				(fill no)
+			)
+		)
+		(uuid "479b5a4a-b03a-5fe2-bf0e-a2a72814441e")
+	)
+	(pad "" np_thru_hole circle
+		(at 0 0)
+		(size 0.5 0.5)
+		(drill 0.5)
+		(layers "*.Cu" "*.Mask")
+		(uuid "7041ad15-0ca2-565d-8e7f-69708c9eb25d")
+	)
+	(fp_rect
+		(start -1.475 -2.63)
+		(end 1.475 1.13)
+		(stroke
+			(width 0.1)
+			(type solid)
+		)
+		(fill no)
+		(layer "F.Fab")
+		(uuid "9cce0bfa-6c7e-5511-9134-6a96c4c36368")
+	)
+	(fp_rect
+		(start -1.725 -2.88)
+		(end 1.725 1.38)
+		(stroke
+			(width 0.05)
+			(type solid)
+		)
+		(fill no)
+		(layer "F.CrtYd")
+		(uuid "7426fa0c-c26f-5934-b75d-5a776727535a")
+	)
+	(fp_line
+		(start -1.595 -2.75)
+		(end 1.595 -2.75)
+		(stroke
+			(width 0.12)
+			(type solid)
+		)
+		(layer "F.SilkS")
+		(uuid "b1aa3a39-5f6b-589b-a49b-bdcc328cad1b")
+	)
+	(fp_line
+		(start -1.595 1.25)
+		(end 1.595 1.25)
+		(stroke
+			(width 0.12)
+			(type solid)
+		)
+		(layer "F.SilkS")
+		(uuid "fc86cae9-67a8-567a-8a20-5aa2a702994e")
+	)
+	(fp_circle
+		(center -1.75 -2.9)
+		(end -1.65 -2.9)
+		(stroke
+			(width 0.12)
+			(type solid)
+		)
+		(fill yes)
+		(layer "F.SilkS")
+		(uuid "faae23e0-d977-5065-b95d-1c3e9759d0db")
+	)
+	(attr smd)
+)
