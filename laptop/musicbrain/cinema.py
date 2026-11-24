@@ -8,9 +8,13 @@
     hits (explosions, gunshots, slams) send one accent in the scene's own colour - never a white flash
   - intensity: subtle (films), normal, intense (games), like Hue Sync's settings
 
+  - music in the film (a soundtrack song, a score with a beat): the screen colours move with it, a soft
+    wave from the centre on each beat and a bigger one on each bar; dialogue stays calm
+
 Without screen capture (not Windows, or turned off) it runs a calm palette wash with the same sound
-reactions. DRM-protected video (Netflix in some browsers) shows up black to any screen capture: then the
-lights follow the sound and keep the last colours.
+reactions. DRM-protected video (Netflix and other streaming sites) shows up black to any screen capture:
+when the screen stays black while the film is clearly playing, it switches to mood colours that follow the
+sound until the picture can be seen again.
 """
 import math
 import os
@@ -151,6 +155,9 @@ class Cinema:
         self.calm = 0.0
         self.status = ""
         self.last_screen = None
+        self.black_for = 0.0           # how long the screen has been black while sound plays
+        self.protected = False
+        self.waves = []                # beat waves (start time, strength)
 
     def _screen_target(self, R, img):
         img = crop_bars(img)
@@ -170,17 +177,27 @@ class Cinema:
         scene = getattr(D, "scene", None) or {}
         scr = getattr(D, "screen_img", None)
         if scr is not None:
+            # a black screen while the film is clearly playing = the picture is protected (DRM)
+            black = float(scr.max()) < 0.04
+            if black and not A.silence and A.energy > 0.2:
+                self.black_for += dt
+            elif not black:
+                self.black_for, self.protected = 0.0, False
+            if self.black_for > 1.5:
+                self.protected = True
+        if scr is not None and not self.protected:
             tgt, bright = self._screen_target(R, scr)
             self.last_screen = (tgt, bright)
             src = "screen"
-        elif self.last_screen is not None and getattr(D, "screen_on", False):
+        elif self.last_screen is not None and getattr(D, "screen_on", False) and not self.protected:
             tgt, bright = self.last_screen
             src = "last screen colours"
         else:
+            # mood colours that follow the sound: calmer and cooler in dialogue, warmer in action
             m = 0.5 + 0.5 * np.sin(2 * math.pi * (R.x * 0.8 + t * 0.02))
             tgt = D.palette.at(R.x * 0.4 + t * 0.005) * (0.6 + 0.4 * m)[:, None]
-            bright = 0.6
-            src = "palette"
+            bright = 0.45 + 0.4 * A.energy
+            src = "screen is protected (DRM): following the sound" if self.protected else "palette"
         tgt = np.clip(tgt, 0, 1)
         # grey / white parts of the picture (bright rooms, web pages, subtitles) never become white light:
         # they turn into a dim tint of the palette instead
@@ -215,7 +232,24 @@ class Cinema:
             lvl *= 0.75                                            # quiet scene
         self.level += (lvl - self.level) * (1 - math.exp(-dt / 0.8))
         img = self.cur * self.level
-        if P["motion"] > 0 and music > 0.3 and not dialogue:       # a slow drift while music plays
+        # music in the film: waves on the beat (only with a clear beat, never over dialogue)
+        beat_ok = music > 0.35 and not dialogue and A.locked and A.tconf > 0.3
+        if beat_ok and A.beat_tick:
+            amp = (0.25 + 0.5 * P["accent"]) * (1.0 if A.downbeat else 0.55) * min(1.0, music * 1.5)
+            self.waves.append((t, amp))
+            self.waves = self.waves[-4:]
+        if self.waves:
+            per = max(0.3, A.period)
+            boost = np.zeros(R.n)
+            keep = []
+            for t0, amp in self.waves:
+                age = (t - t0) / per
+                if age < 1.0:
+                    keep.append((t0, amp))
+                    boost = np.maximum(boost, np.exp(-0.5 * ((R.dc - age) / 0.12) ** 2) * amp * (1 - age))
+            self.waves = keep
+            img = img * (1 + boost[:, None]) + self.cur * (boost * 0.25)[:, None]
+        elif P["motion"] > 0 and music > 0.3 and not dialogue:       # music without a clear beat: a slow drift
             sh = P["motion"] * 0.04 * math.sin(2 * math.pi * t * 0.05)
             img = np.roll(img, int(sh * R.n), axis=0)
         # impacts: an explosion / gunshot / slam = one accent in the scene's own colour
@@ -234,5 +268,6 @@ class Cinema:
                 ring = np.exp(-0.5 * ((R.dc - age / 0.7) / 0.06) ** 2) * (1 - age / 0.7) * self.flash
                 img = np.maximum(img, ring[:, None] * self.flash_col)
             self.flash *= math.exp(-dt / 0.22)
-        self.status = f"{src}{' · dialogue' if self.calm > 0.5 else ''}{' · score' if music > 0.3 else ''}"
+        self.status = (f"{src}{' · dialogue' if self.calm > 0.5 else ''}"
+                       f"{' · music on the beat' if beat_ok else (' · score' if music > 0.3 else '')}")
         return np.clip(img, 0, 1)

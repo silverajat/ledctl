@@ -118,12 +118,18 @@ class ModeSwitch:
         self.reason = "starting"
         self.want, self.since = None, 0.0
 
-    def update(self, t, song, scene, silent):
+    def update(self, t, song, scene, silent, video=None):
         if self.setting != "auto":
             self.active, self.reason = self.setting, "set on the bench"
             return
         spotify = bool(song) and " - " in song and not song.startswith("(")
         sp, mu, fx = scene.get("speech", 0), scene.get("music", 0), scene.get("fx", 0)
+        if video and not spotify:                  # a film / video in front: cinema, even when it has music
+            want, why = "cinema", f"{video} is in front"
+            if self.active != want:
+                self.active, self.reason, self.want = want, why, None
+            self.reason = why
+            return
         if spotify:
             want, why = "music", "Spotify is playing"
         elif silent:
@@ -153,6 +159,49 @@ def _np(o):
 
 def jdump(o):
     return json.dumps(o, default=_np)
+
+
+# ---------------------------------------------------------------- what's in front (Windows)
+VIDEO_SITES = ("netflix", "youtube", "prime video", "disney+", "disney plus", "hulu", "hbo", "crunchyroll",
+               "twitch", "vimeo", "apple tv", "viu", "iqiyi", "hotstar", "plex", "jellyfin")
+VIDEO_APPS = ("vlc.exe", "mpv.exe", "potplayer", "mpc-hc", "mpc-be", "wmplayer.exe", "video.ui.exe",
+              "microsoft.media.player.exe", "netflix.exe", "kodi.exe", "plex.exe", "stremio.exe")
+BROWSERS = ("firefox.exe", "chrome.exe", "msedge.exe", "brave.exe", "opera.exe", "vivaldi.exe", "arc.exe")
+
+
+def video_in_front():
+    """name of the video site / player in the foreground window, or None (Windows only)"""
+    if os.name != "nt":
+        return None
+    import ctypes
+    from ctypes import wintypes
+    u32, k32 = ctypes.windll.user32, ctypes.windll.kernel32
+    u32.GetForegroundWindow.restype = wintypes.HWND
+    hwnd = u32.GetForegroundWindow()
+    if not hwnd:
+        return None
+    n = u32.GetWindowTextLengthW(hwnd)
+    t = ctypes.create_unicode_buffer(n + 1)
+    u32.GetWindowTextW(hwnd, t, n + 1)
+    title = t.value.lower()
+    pid = wintypes.DWORD()
+    u32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+    h = k32.OpenProcess(0x1000, False, pid.value)
+    exe = ""
+    if h:
+        buf = ctypes.create_unicode_buffer(260)
+        sz = wintypes.DWORD(260)
+        if k32.QueryFullProcessImageNameW(h, 0, buf, ctypes.byref(sz)):
+            exe = os.path.basename(buf.value).lower()
+        k32.CloseHandle(h)
+    if any(a in exe for a in VIDEO_APPS):
+        return exe.replace(".exe", "")
+    if exe in BROWSERS:
+        words = set(re.split(r"[^a-z0-9+]+", title))
+        for s in VIDEO_SITES:
+            if (" " in s and s in title) or s in words:
+                return s.title() if s != "youtube" else "YouTube"
+    return None
 
 
 # ---------------------------------------------------------------- now playing (Windows)
@@ -216,6 +265,7 @@ class Engine:
         self.screen = None                                       # started the first time cinema mode runs
         self.screen_on = True
         self.V = None
+        self.video = None                                        # a video site / player in front (polled)
         self.ab = False
         self.D2 = None
         self.q = None
@@ -275,7 +325,7 @@ class Engine:
             D = self.D
             if A.n % 25 == 0:
                 scene = G.scene if (G is not None and G.ok) else {}
-                self.modes.update(A.t, self.song, scene, A.silent_for > 2.0)
+                self.modes.update(A.t, self.song, scene, A.silent_for > 2.0, self.video)
                 D.scene = scene
                 if D.mode != self.modes.active:
                     D.mode = self.modes.active
@@ -476,7 +526,7 @@ def make_handler(eng):
                     D._new_palette(eng.A)
                 if body.get("mode") in ("auto", "music", "cinema"):
                     eng.modes.setting = body["mode"]
-                    eng.modes.update(eng.A.t, eng.song, D.scene, False)
+                    eng.modes.update(eng.A.t, eng.song, D.scene, False, eng.video)
                 if body.get("intensity") in INTENSITY:
                     D.cine.intensity = body["intensity"]
                 if "screen" in body:
@@ -554,6 +604,10 @@ def main():
                 if args.wav:
                     time.sleep(1.0)
                     continue
+                try:
+                    eng.video = video_in_front()
+                except Exception:
+                    eng.video = None
                 s = now_playing()
                 if s != eng.song:
                     eng.song = s
