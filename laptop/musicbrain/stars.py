@@ -26,6 +26,7 @@ class Stars:
         self.bar = None
         self.out = (0.0, 0.0)          # (group 1 = B, group 2 = G), 0..1 perceived
         self.test_until = -1.0
+        self.last_kick = -9.0
         self.always_full = False
         self.bass_only = True          # True: stars follow the bass only; False: the fuller star show below       # stars simply on at 100% while the brain runs (False: follow the music)
 
@@ -33,13 +34,16 @@ class Stars:
         self.test_until = t + secs
 
     def _bass(self, D, A, t, dt):
-        """Stars follow the bass only: they flick with every kick / bass hit and glow with the bass line."""
+        """Stars follow the kick only: one clean, full flash per strong kick, never more than one per beat."""
         if D.look == "idle":
             return 0.0, 0.0
-        if A.hit_kick:
-            self.drop = max(self.drop, 0.5 + 0.5 * min(1.0, A.kick.strength))
-        glow = min(1.0, max(0.0, (A.bass - 0.4) / 0.6)) ** 1.5 * 0.6   # bass line, off when the bass is low
-        return glow, glow
+        per = max(0.3, getattr(A, "period", 0.5))
+        on_beat = min(A.phase, 1.0 - A.phase) < 0.25           # near the beat grid, not a stray hit
+        if (A.hit_kick and A.kick.strength > 0.4 and on_beat
+                and t - self.last_kick > 0.7 * per):
+            self.drop = 1.0
+            self.last_kick = t
+        return 0.0, 0.0
 
     def _music(self, D, A, t, dt):
         bp = A.beat + A.phase
@@ -92,7 +96,12 @@ class Stars:
         per = max(0.3, getattr(A, "period", 0.5))
         self.tw = [v * math.exp(-dt / 0.12) for v in self.tw]
         self.hb *= math.exp(-dt / 0.25)
-        self.drop *= math.exp(-dt / (0.09 if self.bass_only and D.mode != "cinema" else 0.8 * per))   # a quick flick
+        if self.bass_only and D.mode != "cinema":
+            self.drop *= math.exp(-dt / 0.07)                   # a short, sharp flash
+            if self.drop < 0.08:
+                self.drop = 0.0                                 # then fully dark until the next kick
+        else:
+            self.drop *= math.exp(-dt / (0.8 * per))
         g1 = max(b1, self.tw[0], self.hb, self.drop)
         g2 = max(b2, self.tw[1], self.hb, self.drop)
         if not self.enabled:
