@@ -16,7 +16,7 @@ import math
 class Stars:
     def __init__(self):
         self.enabled = True
-        self.cap = 0.9                 # safety margin on the string's current
+        self.cap = 1.0                 # the 30 ohm resistor already limits the string's current
         self.tw = [0.0, 0.0]           # twinkle envelopes per group
         self.hb = 0.0                  # heartbeat envelope
         self.drop = 0.0
@@ -26,6 +26,7 @@ class Stars:
         self.bar = None
         self.out = (0.0, 0.0)          # (group 1 = B, group 2 = G), 0..1 perceived
         self.test_until = -1.0
+        self.always_full = True        # stars simply on at 100% while the brain runs (False: follow the music)
 
     def test(self, t, secs=3.0):
         self.test_until = t + secs
@@ -80,10 +81,10 @@ class Stars:
         self.drop *= math.exp(-dt / (0.8 * per))
         g1 = max(b1, self.tw[0], self.hb, self.drop)
         g2 = max(b2, self.tw[1], self.hb, self.drop)
-        if t < self.test_until:
-            g1 = g2 = 0.8
-        elif not self.enabled:
+        if not self.enabled:
             g1 = g2 = 0.0
         k = self.cap * D.brightness
         self.out = (min(1.0, g1) * k, min(1.0, g2) * k)
+        if t < self.test_until or (self.always_full and self.enabled):
+            self.out = (1.0, 1.0)      # test: full power, whatever the brightness slider says
         return self.out
