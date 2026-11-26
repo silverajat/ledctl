@@ -22,6 +22,7 @@ import numpy as np
 import colorsys
 
 from cinema import Cinema
+from stars import Stars
 
 
 def hsv(h, s=1.0, v=1.0):
@@ -426,6 +427,7 @@ class Director:
         self.force_palette = None     # palette override (B strip)
         self.mode = "music"           # or "cinema" (films, YouTube, games)
         self.cine = Cinema()
+        self.stars = Stars()          # the star string on J4's spare outputs
         self.scene = {}               # what the sound is (speech / music / effects), from YAMNet
         self.screen_img = None        # the shrunk screen, in cinema mode
         self.screen_on = False
@@ -734,6 +736,7 @@ class Director:
         if self.mode == "cinema":
             img = self.cine.render(self.S, A, self, t, dt) * self.brightness
             self.out = img
+            self.stars.update(self, A, A.t, dt)
             return self._finish(img.copy())
         self.choose(A)
         R = self.S
@@ -786,6 +789,7 @@ class Director:
         # temporal smoothing: instant attack, short release (kills flicker, keeps the snaps crisp)
         rel = math.exp(-dt / F["release"])
         self.out = np.where(img > self.out, img, self.out * rel + img * (1 - rel))
+        self.stars.update(self, A, A.t, dt)
         return self._finish(self.out.copy())
 
     def _finish(self, out):
@@ -806,5 +810,5 @@ class Director:
                 "family": self.family, "amps": round(self.current_a, 2), "lock": self.lock, "root": self.root,
                 "style": self.feel["style"], "mode": self.mode, "cine": self.cine.status,
                 "intensity": self.cine.intensity, "bright": round(self.brightness, 2), "layout": self.cine.layout,
-                "blackout": round(self.blackout, 2),
+                "blackout": round(self.blackout, 2), "stars": [round(v, 2) for v in self.stars.out],
                 "pal_cols": [list((c * 255).astype(int)) for c in self.palette.cols]}

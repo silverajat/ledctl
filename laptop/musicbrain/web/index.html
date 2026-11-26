@@ -101,6 +101,8 @@ button:hover{border-color:#3a4150}
     <label><input type="checkbox" id="screen" checked> screen colours</label>
     <label>layout <select id="layout"><option value="room">strip in the room</option><option value="screen">strip around the screen</option></select></label>
     <label><input type="checkbox" id="flip"> flip</label>
+    <label><input type="checkbox" id="stars" checked> star lights</label>
+    <button id="starstest">test stars (3 s)</button>
     <label>LEDs <select id="leds"><option>30</option><option>45</option><option>60</option><option>90</option><option>120</option><option selected>115</option></select></label>
     <label>brightness <input type="range" id="bright" min="0" max="1" step="0.05" value="1"></label>
     <label>sync offset <input type="range" id="la" min="-0.15" max="0.25" step="0.01" value="0.04"><span id="lav" class="muted">+40 ms</span></label>
@@ -193,7 +195,8 @@ function ui(m){
   $("src").textContent = `${m.src} · ${m.sr} Hz`;
   const bd = m.board && m.board.dev;
   $("board").textContent = m.board ? `strip: ${m.board.status}${m.board.fps ? " · sending " + m.board.fps + " fps" : ""}` +
-    (bd ? ` · board: ${bd.mode}, showing ${bd.fps} fps, ${bd.n} LEDs${bd.fbad ? ", " + bd.fbad + " bad frames" : ""}, ${bd.ma} mA` : "") : "";
+    (bd ? ` · board: ${bd.mode}, showing ${bd.fps} fps, ${bd.n} LEDs${bd.fbad ? ", " + bd.fbad + " bad frames" : ""}, ${bd.ma} mA` : "") +
+    (dd.stars ? ` · stars ${Math.round(Math.max(dd.stars[0], dd.stars[1]) * 100)}%` : "") : "";
   $("bpm").textContent = a.silent ? "—" : `${a.bpm.toFixed(0)}${a.locked ? "" : "?"}`;
   beatsEl.forEach((b,i) => b.classList.toggle("on", !a.silent && a.locked && i === a.bb && a.phase < 0.5));
   $("look").textContent = dd.mode === "cinema" ? "cinema" : dd.look + (dd.lock !== "auto" ? " (locked)" : "");
@@ -245,6 +248,8 @@ $("inten").onchange = e => api({intensity: e.target.value});
 $("screen").onchange = e => api({screen: e.target.checked});
 $("flip").onchange = e => api({flip: e.target.checked});
 $("layout").onchange = e => api({layout: e.target.value});
+$("stars").onchange = e => api({stars: e.target.checked});
+$("starstest").onclick = () => api({stars_test: 1});
 $("abtoggle").onclick = () => api({ab: !abOn});
 const vote = v => fetch("/api", {method:"POST", body: JSON.stringify({vote: v})}).then(r => r.text()).then(t => toast(t === "saved" ? "picked, next one…" : t));
 $("v1").onclick = () => vote(1); $("v2").onclick = () => vote(2); $("v0").onclick = () => vote(0);

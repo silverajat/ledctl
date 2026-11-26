@@ -183,7 +183,17 @@ void audioRx() {
 }
 int currentMa = -1;
 extern float capScale;
+void sendFrame(uint8_t cmd, uint8_t a, uint8_t b, uint8_t c);
+// lights on J4's spare outputs (a star string): the laptop sends one extra pixel after the strip's LEDs,
+// its G = J4 pin 2, its B = J4 pin 4. The FPGA turns them off by itself when frames stop.
+uint8_t sentSG = 255, sentSB = 255; uint32_t starT = 0;
 void forwardFrame(const uint8_t *rgb, uint16_t n) {
+  if (n == st.nleds + 1) {
+    uint8_t g = rgb[n * 3 - 2], b = rgb[n * 3 - 1];
+    if (capScale < 0.999f) { g = (uint8_t)(g * capScale); b = (uint8_t)(b * capScale); }
+    if (g != sentSG || b != sentSB || millis() - starT > 1000) { sendFrame('S', g, b, 0); sentSG = g; sentSB = b; starT = millis(); }
+    n = st.nleds;
+  }
   if (n > MAX_LEDS) n = MAX_LEDS;
   uint8_t hdr[3] = {0xA7, (uint8_t)(n & 0xFF), (uint8_t)(n >> 8)};
   Serial1.write(hdr, 3);

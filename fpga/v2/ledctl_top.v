@@ -42,6 +42,9 @@ module ledctl_top (
     // addressable strip settings
     reg [8:0] nleds = 9'd60;          // LEDs on the strip (max 300)
     reg ws_mode = 1'b1;               // 1 = WS2812B data out, 0 = old analog RGB PWM on J4
+    // extra lights on J4's spare MOSFET outputs while the strip runs on its data pin (e.g. a star string):
+    // "S" g b sets their brightness 0-255 (G = J4 pin 2, B = J4 pin 4); off when the laptop's frames stop
+    reg [7:0] star_g = 8'd0, star_b = 8'd0;
     // frame packets: 0xA7, n_lo, n_hi, then n * (R, G, B). Two banks: one being shown, one being filled.
     reg [7:0] fb_mem [0:2047];        // bank 0 = 0..1023, bank 1 = 1024..2047
     reg wbank = 1'b0, sbank = 1'b1;   // write bank, show bank
@@ -87,6 +90,7 @@ module ledctl_top (
                         "T": begin thr_ratio <= fa; thr_floor <= fb; end
                         "N": nleds <= ({fb[0], fa} > 9'd300) ? 9'd300 : ({fb[0], fa} == 0 ? 9'd1 : {fb[0], fa});
                         "A": ws_mode <= fa[0];
+                        "S": begin star_g <= fa; star_b <= fb; end
                         // "W" (bit timing) is accepted and ignored: the timing is fixed in the ws2812 module
                         default: ;
                     endcase
@@ -175,8 +179,8 @@ module ledctl_top (
     // idle (line low) = pin high. A 1 k pull-up from J4 pin 1 (+5V) to J4 pin 3 makes the line's high level.
     assign ws_direct = ws_out;
     assign pwm_r = ws_mode ? ~ws_out : a_r;
-    assign pwm_g = ws_mode ? 1'b0 : a_g;
-    assign pwm_b = ws_mode ? 1'b0 : a_b;
+    assign pwm_g = ws_mode ? (live && pcnt < star_g) : a_g;
+    assign pwm_b = ws_mode ? (live && pcnt < star_b) : a_b;
 
     // ---------------- telemetry -> ESP32 ----------------
     // every 10 ms and immediately on a beat: 0xFF, loud, level, beat count, bass, mid, high (all 0-254)

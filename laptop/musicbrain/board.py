@@ -30,6 +30,8 @@ class Board:
         self.status = "off" if mode == "off" else "looking for the board…"
         self.link = None
         self.frame = None
+        self.strip_n = 0
+        self.stars = None         # (group 1 = J4 pin 4, group 2 = J4 pin 2) 0..1, sent as one extra pixel
         self.n_sent = None
         self.new = threading.Event()
         self.sent = 0
@@ -39,9 +41,15 @@ class Board:
         if mode != "off":
             threading.Thread(target=self._run, daemon=True).start()
 
-    def push(self, rgb):
-        """rgb: (n, 3) uint8, perceptual (as shown on the bench)"""
-        self.frame = GAMMA[rgb]
+    def push(self, rgb, stars=None):
+        """rgb: (n, 3) uint8, perceptual (as shown on the bench); stars: (pin 4, pin 2) levels 0..1"""
+        f = GAMMA[rgb]
+        if stars is not None:
+            # one extra pixel after the strip: its B drives J4 pin 4, its G J4 pin 2 (the board takes it off)
+            b, g = (int(round(255 * min(1.0, max(0.0, v)) ** 2.2)) for v in stars)
+            f = np.concatenate([f, np.array([[0, g, b]], np.uint8)])
+        self.strip_n = len(rgb)
+        self.frame = f
         self.new.set()
 
     def state(self):
@@ -95,9 +103,9 @@ class Board:
                 self.new.clear()
                 f = self.frame
                 n = len(f)
-                if n != self.n_sent:
-                    s.write(f"n={n}\n".encode())
-                    self.n_sent = n
+                if self.strip_n != self.n_sent:
+                    s.write(f"n={self.strip_n}\n".encode())
+                    self.n_sent = self.strip_n
                 data = f.tobytes()
                 s.write(bytes([0xA8, n & 0xFF, n >> 8]) + data + bytes([sum(data) & 0xFF]))   # checksummed
                 if s.in_waiting:
@@ -157,9 +165,9 @@ class Board:
                 self.new.clear()
                 f = self.frame
                 n = len(f)
-                if n != self.n_sent:
-                    await c.write_gatt_char(CMD, f"n={n}".encode(), response=True)
-                    self.n_sent = n
+                if self.strip_n != self.n_sent:
+                    await c.write_gatt_char(CMD, f"n={self.strip_n}".encode(), response=True)
+                    self.n_sent = self.strip_n
                 for off in range(0, n, per):
                     k = min(per, n - off)
                     last = 1 if off + k >= n else 0

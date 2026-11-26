@@ -359,7 +359,7 @@ class Engine:
                     fr2 = self.D2.render(V, A.t, A.dt)
                     self.D2.events.clear()
             if self.board.mode != "off":
-                self.board.push(fr)
+                self.board.push(fr, self.D.stars.out if self.D.stars.enabled else None)
             with self.lock:
                 self.frame = fr
                 self.frame2 = fr2
@@ -522,6 +522,10 @@ def make_handler(eng):
                         eng.D2, eng.q = None, None
                 if "vote" in body:
                     return self._send(200, eng.vote(int(body["vote"])))
+                if body.get("stars_test"):
+                    D.stars.test(eng.A.t, 3.0)
+                if "stars" in body:
+                    D.stars.enabled = bool(body["stars"])
                 if body.get("newpal"):
                     D._new_palette(eng.A)
                 if body.get("mode") in ("auto", "music", "cinema"):
