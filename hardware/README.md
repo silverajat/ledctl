@@ -16,6 +16,8 @@ Connect ground first and data last. Power comes from USB-C through a 2.6 A fuse;
 to about 2 A.
 
 ## Known notes
+- J4 pins 2 and 4 drive the star string (a plain LED string between J4 pin 1 and pin 4, with a series
+  resistor). Don't confuse J4 with J2: J2 pin 5 is the FPGA's JTAG TDO.
 - J4's outputs are open-drain MOSFETs. For WS2812B data they need a pull-up and switch too slowly at normal
   drive strength, so the strip uses J3 instead (see `docs/bringup.md`).
 - MK2's ground ring is 0.16 mm from its sound hole (fixed in the source for v2; no effect on these boards).

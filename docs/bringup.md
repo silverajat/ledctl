@@ -76,8 +76,33 @@ overflowed while Wi-Fi and Bluetooth were busy. Dropped bytes shifted every colo
 **Fix:** an 8 KB receive buffer and a checksum on every frame (`0xA8, n, RGB…, sum8`). A damaged frame is
 dropped, never shown, and the board counts drops (`fbad` in its state).
 
+## The star lights (26 Nov 2026)
+
+### 11. Star lights that only lit at power-up
+**Setup:** a 2×AA warm-white star string, wired from J4 pin 1 (+5 V) through 30 Ω to one of J4's spare
+low-side MOSFET outputs, dimmed by the FPGA.
+**Symptom:** the stars never lit while the show ran, but flashed for about a second every time the board
+started.
+**Steps:**
+1. A full flash erases the board's saved settings, so the strip length could fall back to 100 and the
+   extra "star pixel" would be read as a strip LED. Made that impossible: the laptop reads the board's state
+   every 2 s and resends the length, and the firmware treats the last pixel as the stars whenever a frame
+   is longer than the strip.
+2. Still dark. A test script with the strip held constant and the stars cycling full / half / off showed
+   the board's current didn't change at all (~345 mA in every phase), so no current was flowing.
+3. Added read-back at every stage: the star level the ESP32 sends, how many star commands it sent, the
+   level the FPGA holds, and the FPGA's output pins (in the telemetry). Every stage reported the right value
+   and the output pin high, at 100%.
+4. So the fault was past the board: the wire was on **J2 pin 5**, not J4 pin 4. J2 pin 5 is the FPGA's
+   JTAG data output, which only toggles while the ESP32 loads the FPGA: that was the flash at power-up.
+   Moving it with the power on also left the FPGA unconfigured until a power cycle.
+**Fix:** the wire on J4 pin 4. The stars now flash once per strong on-beat kick.
+
 ## Lessons
 - Add observability before guessing. The two FPGA counters ended two hours of guesswork in one run.
 - When a fix makes one thing work and another break, look at what's physically next to it.
+- Measure before rewriting. The current sensor said "no current" before any code changed; read-back at
+  every stage then proved the code and pointed at the wiring.
+- Change wiring with the power off.
 - Test against what the user actually sees: the bench matched, the strip didn't, and that difference was the
   bug.

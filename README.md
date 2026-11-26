@@ -42,6 +42,9 @@ Runtime) · Android (Java) · OpenSCAD
   colours from the laptop screen, the way Hue Sync lights a room (or edge by edge, Ambilight-style, for
   a strip around the screen); white becomes a dim tint. Dialogue keeps it calm, the score swells it, music
   with a beat sends waves on the beat, and explosions send one accent in the scene's own colour.
+- **A second light that hits on the kick.** A plain (non-addressable) star string on the board's spare
+  MOSFET output, dimmed by the FPGA. It stays dark and gives one clean, full flash on each strong
+  on-beat kick, so it reads as the "thump" behind the strip's movement.
 - **Learns your taste.** An A/B mode shows two versions of the same moment side by side. Your picks are
   saved per genre and the director follows them.
 - **Runs without the laptop.** The phone app (Bluetooth) and the board's own modes (solid, breathe, party,
@@ -63,6 +66,7 @@ flowchart LR
         E[ESP32-C3<br/>BLE / Wi-Fi / USB] -- "1 Mbaud UART" --> F[Gowin GW2AR-18 FPGA]
         E -- "JTAG: loads the FPGA<br/>at every power-up" --> F
         F -- "WS2812B data" --> S[115-LED strip]
+        F -- "26 kHz PWM via<br/>low-side MOSFET" --> T[Star string]
         I[INA219<br/>current sensor] --> E
     end
 ```
@@ -96,12 +100,16 @@ flowchart LR
   working.
 - **UART input with a glitch filter** (the line only changes after 5 equal samples) against crosstalk from
   the strip pins next to it.
-- **Diagnostics in the telemetry:** packets received and strip refreshes sent. Those two counters found the
-  last bring-up bug (below).
+- **Star PWM** on two spare MOSFET outputs: set by a 5-byte command, 8-bit duty at ~26 kHz from a
+  set/reset flop, forced off when frames stop. The laptop sends the level as one extra pixel after the
+  strip, and the ESP32 turns it into the command.
+- **Diagnostics in the telemetry:** packets received, strip refreshes sent, the star levels the FPGA holds,
+  and its live flags (frames arriving, strip mode, the state of each output pin). The laptop shows them all,
+  so the whole path from the music brain to an output pin can be checked without a scope.
 - The v1 audio front end is still in there: I2S receiver, IIR 3-band filter bank with log envelopes,
   beat detector, telemetry to the ESP32 every 10 ms.
 - Open toolchain only: Yosys, nextpnr-himbaechel, gowin_pack. Testbenches in Icarus Verilog
-  (`tb_ws.v`, `tb_boot.v`, `tb_glitch.v`). About 28% of the FPGA's LUTs.
+  (`tb_ws.v`, `tb_boot.v`, `tb_glitch.v`, `tb_stars.v`). About 28% of the FPGA's LUTs.
 
 ## The music brain ([`laptop/musicbrain`](laptop/musicbrain))
 
@@ -164,12 +172,16 @@ The full log is in [`docs/bringup.md`](docs/bringup.md). The short version:
    the strip to a direct FPGA pin and added the counters that proved it.
 7. **Random colours on the strip but not on screen:** the ESP32's USB receive buffer overflowed at
    18 KB/s. A bigger buffer plus a checksum on every frame fixed it.
+8. **The star lights never lit** (except for a second at every power-up). The board's current sensor showed
+   no extra draw even at 100%, so I added read-back at every stage (laptop → ESP32 → FPGA register → pin).
+   Every stage was right, so the fault was past the board: the wire was on J2 pin 5, the FPGA's JTAG data
+   output, which only toggles while the ESP32 loads the FPGA. That also explained the flash at power-up.
 
 ## Status and next steps
 
 **Working:** the board, FPGA strip driver, ESP32 firmware, phone app, laptop music brain over USB or
-Bluetooth, the LJ-style effect engine, pre-planned shows for known songs, cinema mode, light bench, genre
-network, A/B taste learning.
+Bluetooth, the LJ-style effect engine, pre-planned shows for known songs, cinema mode, the star string on the
+kick, light bench, genre network, A/B taste learning.
 
 **Next:**
 - Run the scoring and tuning on a set of recorded songs
