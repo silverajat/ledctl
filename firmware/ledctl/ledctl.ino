@@ -171,14 +171,16 @@ void onAudio(uint8_t loud, uint8_t level, uint8_t cnt, uint8_t lb, uint8_t lm, u
 
 uint8_t fpgaWs = 0;                    // strip refreshes the FPGA has sent (diagnostics)
 uint8_t fpgaRx = 0;                    // packets the FPGA says it received (diagnostics)
+int fpgaStarG = -1, fpgaStarB = -1;     // star levels the FPGA reports holding (-1: FPGA doesn't report them)
 void audioRx() {
-  static uint8_t buf[8]; static int n = -1;
+  static uint8_t buf[10]; static int n = -1;
   while (Serial1.available()) {
     uint8_t c = Serial1.read();
     if (c == 0xFF) { n = 0; continue; }
     if (n < 0) continue;
     buf[n++] = c;
-    if (n == 8) { onAudio(buf[0], buf[1], buf[2], buf[3], buf[4], buf[5]); fpgaRx = buf[6]; fpgaWs = buf[7]; n = -1; }
+    if (n == 8) { onAudio(buf[0], buf[1], buf[2], buf[3], buf[4], buf[5]); fpgaRx = buf[6]; fpgaWs = buf[7]; }
+    if (n == 10) { fpgaStarG = buf[8]; fpgaStarB = buf[9]; n = -1; }
   }
 }
 int currentMa = -1;
@@ -186,12 +188,12 @@ extern float capScale;
 void sendFrame(uint8_t cmd, uint8_t a, uint8_t b, uint8_t c);
 // lights on J4's spare outputs (a star string): the laptop sends one extra pixel after the strip's LEDs,
 // its G = J4 pin 2, its B = J4 pin 4. The FPGA turns them off by itself when frames stop.
-uint8_t sentSG = 255, sentSB = 255; uint32_t starT = 0;
+uint8_t sentSG = 255, sentSB = 255; uint32_t starT = 0, starCmds = 0;
 void forwardFrame(const uint8_t *rgb, uint16_t n) {
   if (n > st.nleds) {                  // the last pixel is the star string (also if the board forgot the strip length)
     uint8_t g = rgb[n * 3 - 2], b = rgb[n * 3 - 1];
     if (capScale < 0.999f) { g = (uint8_t)(g * capScale); b = (uint8_t)(b * capScale); }
-    if (g != sentSG || b != sentSB || millis() - starT > 1000) { sendFrame('S', g, b, 0); sentSG = g; sentSB = b; starT = millis(); }
+    if (g != sentSG || b != sentSB || millis() - starT > 1000) { sendFrame('S', g, b, 0); sentSG = g; sentSB = b; starT = millis(); starCmds++; }
     n = st.nleds;
   }
   if (n > MAX_LEDS) n = MAX_LEDS;
@@ -324,16 +326,17 @@ float frameRate() {
 }
 
 String stateJson() {
-  char buf[480];
+  char buf[600];
   snprintf(buf, sizeof(buf),
-           "{\"mode\":\"%s\",\"h\":%u,\"s\":%u,\"v\":%u,\"sens\":%u,\"beats\":%lu,\"ma\":%d,\"cap\":%d,\"ph\":%u,\"fpga\":\"%s\",\"lv\":%d,\"mic\":%d,\"sb\":%d,\"sm\":%d,\"sh\":%d,\"nf\":%d,\"raw\":[%u,%u,%u,%u],\"bpm\":%d,\"lk\":%d,\"study\":\"%s\",\"n\":%u,\"fps\":%d,\"w\":\"%u,%u,%u\",\"frx\":%u,\"fws\":%u,\"fbad\":%lu}",
+           "{\"mode\":\"%s\",\"h\":%u,\"s\":%u,\"v\":%u,\"sens\":%u,\"beats\":%lu,\"ma\":%d,\"cap\":%d,\"ph\":%u,\"fpga\":\"%s\",\"lv\":%d,\"mic\":%d,\"sb\":%d,\"sm\":%d,\"sh\":%d,\"nf\":%d,\"raw\":[%u,%u,%u,%u],\"bpm\":%d,\"lk\":%d,\"study\":\"%s\",\"n\":%u,\"fps\":%d,\"w\":\"%u,%u,%u\",\"frx\":%u,\"fws\":%u,\"fbad\":%lu,\"st\":\"%u,%u,%lu,%d,%d\"}",
            MODE_NAMES[st.mode], st.hue, st.sat, st.bri, st.sens, (unsigned long)beats, currentMa,
            (int)lroundf(capScale * 100), partyHue, fpgaStatus.substring(0, 40).c_str(),
            (int)lroundf(au.env * 100), au.live() ? (int)au.raw[0] : -1,
            (int)lroundf(au.b * 100), (int)lroundf(au.m * 100), (int)lroundf(au.h * 100),
            (int)lroundf(au.lvl.x), au.raw[0], au.raw[1], au.raw[2], au.raw[3],
            (int)lroundf(au.tracker.bpm()), au.locked() ? 1 : 0, st.mode == M_STUDY ? studyText().c_str() : "",
-           st.nleds, (int)frameRate(), st.t0h, st.t1h, st.tbit, fpgaRx, fpgaWs, (unsigned long)frameBad);
+           st.nleds, (int)frameRate(), st.t0h, st.t1h, st.tbit, fpgaRx, fpgaWs, (unsigned long)frameBad,
+           sentSG, sentSB, (unsigned long)starCmds, fpgaStarG, fpgaStarB);
   return String(buf);
 }
 

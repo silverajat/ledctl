@@ -179,8 +179,18 @@ module ledctl_top (
     // idle (line low) = pin high. A 1 k pull-up from J4 pin 1 (+5V) to J4 pin 3 makes the line's high level.
     assign ws_direct = ws_out;
     assign pwm_r = ws_mode ? ~ws_out : a_r;
-    assign pwm_g = ws_mode ? (live && pcnt < star_g) : a_g;
-    assign pwm_b = ws_mode ? (live && pcnt < star_b) : a_b;
+    // star PWM from a set/reset flop (equality compares only, no carry-chain compare): on at the start of each
+    // PWM period if the level isn't 0, off when the counter reaches the level
+    reg st_g = 1'b0, st_b = 1'b0;
+    always @(posedge clk) begin
+        if (pcnt == 8'd0) begin st_g <= (star_g != 8'd0); st_b <= (star_b != 8'd0); end
+        else begin
+            if (pcnt == star_g) st_g <= 1'b0;
+            if (pcnt == star_b) st_b <= 1'b0;
+        end
+    end
+    assign pwm_g = ws_mode ? (live && st_g) : a_g;
+    assign pwm_b = ws_mode ? (live && st_b) : a_b;
 
     // ---------------- telemetry -> ESP32 ----------------
     // every 10 ms and immediately on a beat: 0xFF, loud, level, beat count, bass, mid, high (all 0-254)
@@ -213,11 +223,13 @@ module ledctl_top (
                 4'd5: tx_data <= snap_m;
                 4'd6: tx_data <= snap_h;
                 4'd7: tx_data <= rx_cmds;
-                default: tx_data <= snap_wsf;
+                4'd8: tx_data <= snap_wsf;
+                4'd9: tx_data <= (star_g == 8'hFF) ? 8'hFE : star_g;     // what the FPGA holds for the stars
+                default: tx_data <= (star_b == 8'hFF) ? 8'hFE : star_b;
             endcase
             tx_go <= 1'b1;
             tx_idx <= tx_idx + 1'b1;
-            if (tx_idx == 4'd8) sending <= 1'b0;
+            if (tx_idx == 4'd10) sending <= 1'b0;
         end
     end
     uart_tx #(.DIV(27)) u_tx (.clk(clk), .data(tx_data), .start(tx_go), .tx(uart_tx), .busy(tx_busy));
