@@ -166,7 +166,12 @@ module ledctl_top (
         if (frame_done) since_frame <= 0;
         else if (ms_tick && since_frame != 10'd1000) since_frame <= since_frame + 1'b1;
     end
-    wire live = (since_frame < 10'd1000);
+    // "frames are arriving": a flag set by each frame and cleared 1 s after the last one (equality compare only)
+    reg live_r = 1'b0;
+    always @(posedge clk)
+        if (frame_done) live_r <= 1'b1;
+        else if (ms_tick && since_frame == 10'd999) live_r <= 1'b0;
+    wire live = live_r;
     reg [4:0] ref_ms = 0;                  // refresh the uniform colour every 20 ms
     always @(posedge clk) if (ms_tick) ref_ms <= (ref_ms == 5'd19) ? 5'd0 : ref_ms + 1'b1;
     wire refresh = frame_done || (!live && ms_tick && ref_ms == 0);
@@ -225,11 +230,12 @@ module ledctl_top (
                 4'd7: tx_data <= rx_cmds;
                 4'd8: tx_data <= snap_wsf;
                 4'd9: tx_data <= (star_g == 8'hFF) ? 8'hFE : star_g;     // what the FPGA holds for the stars
-                default: tx_data <= (star_b == 8'hFF) ? 8'hFE : star_b;
+                4'd10: tx_data <= (star_b == 8'hFF) ? 8'hFE : star_b;
+                default: tx_data <= {3'b000, pwm_r, pwm_g, pwm_b, ws_mode, live};   // flags (never 0xFF)
             endcase
             tx_go <= 1'b1;
             tx_idx <= tx_idx + 1'b1;
-            if (tx_idx == 4'd10) sending <= 1'b0;
+            if (tx_idx == 4'd11) sending <= 1'b0;
         end
     end
     uart_tx #(.DIV(27)) u_tx (.clk(clk), .data(tx_data), .start(tx_go), .tx(uart_tx), .busy(tx_busy));

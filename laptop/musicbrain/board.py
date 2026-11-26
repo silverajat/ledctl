@@ -56,7 +56,7 @@ class Board:
         s = {"status": self.status, "fps": round(self.rate, 1)}
         d = self.dev
         if d:
-            s["dev"] = {k: d.get(k) for k in ("mode", "fps", "n", "fbad", "ma", "cap", "frx", "fws", "fpga", "st")}
+            s["dev"] = {k: d.get(k) for k in ("mode", "fps", "n", "fbad", "ma", "cap", "frx", "fws", "fpga", "st", "ff")}
         return s
 
     # ------------------------------------------------------------------

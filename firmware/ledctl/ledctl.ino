@@ -172,15 +172,17 @@ void onAudio(uint8_t loud, uint8_t level, uint8_t cnt, uint8_t lb, uint8_t lm, u
 uint8_t fpgaWs = 0;                    // strip refreshes the FPGA has sent (diagnostics)
 uint8_t fpgaRx = 0;                    // packets the FPGA says it received (diagnostics)
 int fpgaStarG = -1, fpgaStarB = -1;     // star levels the FPGA reports holding (-1: FPGA doesn't report them)
+int fpgaFlags = -1;                     // bit 0 live, 1 ws_mode, 2..4 the B, G, R outputs at that moment
 void audioRx() {
-  static uint8_t buf[10]; static int n = -1;
+  static uint8_t buf[11]; static int n = -1;
   while (Serial1.available()) {
     uint8_t c = Serial1.read();
     if (c == 0xFF) { n = 0; continue; }
     if (n < 0) continue;
     buf[n++] = c;
     if (n == 8) { onAudio(buf[0], buf[1], buf[2], buf[3], buf[4], buf[5]); fpgaRx = buf[6]; fpgaWs = buf[7]; }
-    if (n == 10) { fpgaStarG = buf[8]; fpgaStarB = buf[9]; n = -1; }
+    if (n == 10) { fpgaStarG = buf[8]; fpgaStarB = buf[9]; }
+    if (n == 11) { fpgaFlags = buf[10]; n = -1; }
   }
 }
 int currentMa = -1;
@@ -328,7 +330,7 @@ float frameRate() {
 String stateJson() {
   char buf[600];
   snprintf(buf, sizeof(buf),
-           "{\"mode\":\"%s\",\"h\":%u,\"s\":%u,\"v\":%u,\"sens\":%u,\"beats\":%lu,\"ma\":%d,\"cap\":%d,\"ph\":%u,\"fpga\":\"%s\",\"lv\":%d,\"mic\":%d,\"sb\":%d,\"sm\":%d,\"sh\":%d,\"nf\":%d,\"raw\":[%u,%u,%u,%u],\"bpm\":%d,\"lk\":%d,\"study\":\"%s\",\"n\":%u,\"fps\":%d,\"w\":\"%u,%u,%u\",\"frx\":%u,\"fws\":%u,\"fbad\":%lu,\"st\":\"%u,%u,%lu,%d,%d\"}",
+           "{\"mode\":\"%s\",\"h\":%u,\"s\":%u,\"v\":%u,\"sens\":%u,\"beats\":%lu,\"ma\":%d,\"cap\":%d,\"ph\":%u,\"fpga\":\"%s\",\"lv\":%d,\"mic\":%d,\"sb\":%d,\"sm\":%d,\"sh\":%d,\"nf\":%d,\"raw\":[%u,%u,%u,%u],\"bpm\":%d,\"lk\":%d,\"study\":\"%s\",\"n\":%u,\"fps\":%d,\"w\":\"%u,%u,%u\",\"frx\":%u,\"fws\":%u,\"fbad\":%lu,\"st\":\"%u,%u,%lu,%d,%d\",\"ff\":%d}",
            MODE_NAMES[st.mode], st.hue, st.sat, st.bri, st.sens, (unsigned long)beats, currentMa,
            (int)lroundf(capScale * 100), partyHue, fpgaStatus.substring(0, 40).c_str(),
            (int)lroundf(au.env * 100), au.live() ? (int)au.raw[0] : -1,
@@ -336,7 +338,7 @@ String stateJson() {
            (int)lroundf(au.lvl.x), au.raw[0], au.raw[1], au.raw[2], au.raw[3],
            (int)lroundf(au.tracker.bpm()), au.locked() ? 1 : 0, st.mode == M_STUDY ? studyText().c_str() : "",
            st.nleds, (int)frameRate(), st.t0h, st.t1h, st.tbit, fpgaRx, fpgaWs, (unsigned long)frameBad,
-           sentSG, sentSB, (unsigned long)starCmds, fpgaStarG, fpgaStarB);
+           sentSG, sentSB, (unsigned long)starCmds, fpgaStarG, fpgaStarB, fpgaFlags);
   return String(buf);
 }
 
@@ -693,6 +695,12 @@ void loop() {
     }
     if (c == '\n' || c == '\r') {          // "pa=..." lines from the laptop helper over USB
       if (line.startsWith("pa=")) onPhoneAudio(line.substring(3));
+      else if (line.startsWith("fc=") && line.length() >= 11) {   // raw FPGA command for testing: fc=CCAABBDD (hex)
+        uint8_t v[4];
+        for (int i = 0; i < 4; i++) v[i] = (uint8_t)strtoul(line.substring(3 + 2 * i, 5 + 2 * i).c_str(), nullptr, 16);
+        sendFrame(v[0], v[1], v[2], v[3]);
+        Serial.println(stateJson());
+      }
       else if (line.length()) { applyQuery(line); Serial.println(stateJson()); }   // control from the laptop page
       line = "";
     } else if (line.length() < 64) line += (char)c;
