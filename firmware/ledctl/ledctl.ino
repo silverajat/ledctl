@@ -188,7 +188,7 @@ void sendFrame(uint8_t cmd, uint8_t a, uint8_t b, uint8_t c);
 // its G = J4 pin 2, its B = J4 pin 4. The FPGA turns them off by itself when frames stop.
 uint8_t sentSG = 255, sentSB = 255; uint32_t starT = 0;
 void forwardFrame(const uint8_t *rgb, uint16_t n) {
-  if (n == st.nleds + 1) {
+  if (n > st.nleds) {                  // the last pixel is the star string (also if the board forgot the strip length)
     uint8_t g = rgb[n * 3 - 2], b = rgb[n * 3 - 1];
     if (capScale < 0.999f) { g = (uint8_t)(g * capScale); b = (uint8_t)(b * capScale); }
     if (g != sentSG || b != sentSB || millis() - starT > 1000) { sendFrame('S', g, b, 0); sentSG = g; sentSB = b; starT = millis(); }

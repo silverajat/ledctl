@@ -56,7 +56,7 @@ class Board:
         s = {"status": self.status, "fps": round(self.rate, 1)}
         d = self.dev
         if d:
-            s["dev"] = {k: d.get(k) for k in ("mode", "fps", "n", "fbad", "ma", "cap", "frx", "fws")}
+            s["dev"] = {k: d.get(k) for k in ("mode", "fps", "n", "fbad", "ma", "cap", "frx", "fws", "fpga")}
         return s
 
     # ------------------------------------------------------------------
@@ -95,6 +95,7 @@ class Board:
             return False
         self.status = f"USB {port}"
         self.n_sent = None
+        last_q, rx = 0.0, b""
         period = 1.0 / self.fps
         try:
             while self.alive:
@@ -103,13 +104,31 @@ class Board:
                 self.new.clear()
                 f = self.frame
                 n = len(f)
+                dn = (self.dev or {}).get("n")
+                if dn is not None and self.strip_n and dn != self.strip_n:
+                    self.n_sent = None            # the board forgot (reboot / fresh flash): tell it again
                 if self.strip_n != self.n_sent:
                     s.write(f"n={self.strip_n}\n".encode())
                     self.n_sent = self.strip_n
+                    if self.dev:
+                        self.dev["n"] = self.strip_n   # until the board's next report
                 data = f.tobytes()
                 s.write(bytes([0xA8, n & 0xFF, n >> 8]) + data + bytes([sum(data) & 0xFF]))   # checksummed
+                if time.time() - last_q > 2.0:   # ask the board for its state ("?" -> one JSON line)
+                    last_q = time.time()
+                    s.write(b"?")
                 if s.in_waiting:
-                    s.read(s.in_waiting)          # the ESP32 prints state; drain it
+                    rx += s.read(s.in_waiting)    # the ESP32 prints its state as JSON lines
+                    while b"\n" in rx:
+                        line, rx = rx.split(b"\n", 1)
+                        line = line.strip()
+                        if line.startswith(b"{"):
+                            try:
+                                import json
+                                self.dev = json.loads(line.decode("utf-8", "replace"))
+                            except Exception:
+                                pass
+                    rx = rx[-4096:]
                 self._count()
                 time.sleep(max(0.0, period - 0.002))
         except Exception as e:  # noqa  (unplugged)
@@ -165,9 +184,14 @@ class Board:
                 self.new.clear()
                 f = self.frame
                 n = len(f)
+                dn = (self.dev or {}).get("n")
+                if dn is not None and self.strip_n and dn != self.strip_n:
+                    self.n_sent = None
                 if self.strip_n != self.n_sent:
                     await c.write_gatt_char(CMD, f"n={self.strip_n}".encode(), response=True)
                     self.n_sent = self.strip_n
+                    if self.dev:
+                        self.dev["n"] = self.strip_n
                 for off in range(0, n, per):
                     k = min(per, n - off)
                     last = 1 if off + k >= n else 0
