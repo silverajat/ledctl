@@ -22,7 +22,7 @@ python brain.py --leds 115 --board usb|ble|off
 | `show.py` | the director and the effect engine (below) |
 | `songmap.py` | known songs: finds where we are in a recorded song and lays its beats, sections and drops over the live analysis |
 | `cinema.py` | cinema mode: screen colours + sound (films, YouTube, games) |
-| `stars.py` | the star string on J4's spare output: one clean flash per strong on-beat kick (a fuller star show is one setting away) |
+| `stars.py` | the star string on J4's spare output, a different job per section: low breathe, kick hits with afterglow, a build-up strobe, the blinder before the drop, sidechain pump after it, lightning in films |
 | `board.py` | sends frames to the board: checksummed frames over USB at 60 fps, Bluetooth LE as fallback, gamma correction |
 | `brain.py` | ties it together and serves the light bench (`web/index.html`) |
 | `prefs.py` | taste learned from the A/B test, per genre family |
@@ -55,8 +55,10 @@ The director works like a club lighting operator (LJ):
   big impacts send a ripple (at most every 4 bars)
 - no white: grey is never sent, limits scale colours down instead of washing them out
 - a power limit keeps the real strip within the USB supply
-- the star string flashes on the kick and nothing else; in cinema mode it glows in dark scenes and flashes
-  with impacts
+- the star string is used like a club rig's extra lamps: almost off in verses, kick hits with a warm
+  afterglow, a strobe that speeds up through build-ups, alone at full on the dark beat, then a "sidechain
+  pump" (ducked by every kick) for 8 bars after the drop; in films, lightning on impacts and candle flicker
+  in warm dark scenes
 
 ## Modes
 - **music**: the show above. Songs you have played before (and that `truth.py` has analysed) get a

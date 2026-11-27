@@ -42,9 +42,10 @@ Runtime) · Android (Java) · OpenSCAD
   colours from the laptop screen, the way Hue Sync lights a room (or edge by edge, Ambilight-style, for
   a strip around the screen); white becomes a dim tint. Dialogue keeps it calm, the score swells it, music
   with a beat sends waves on the beat, and explosions send one accent in the scene's own colour.
-- **A second light that hits on the kick.** A plain (non-addressable) star string on the board's spare
-  MOSFET output, dimmed by the FPGA. It stays dark and gives one clean, full flash on each strong
-  on-beat kick, so it reads as the "thump" behind the strip's movement.
+- **A second light with its own role.** A plain (non-addressable) star string on the board's spare MOSFET
+  output, dimmed by the FPGA and used like a club rig's extra lamps: almost off in verses, kick hits with a
+  warm afterglow, a strobe that speeds up through the build-up, alone at full on the dark beat (a
+  blinder), then pumping against every kick after the drop. In films: lightning on impacts.
 - **Learns your taste.** An A/B mode shows two versions of the same moment side by side. Your picks are
   saved per genre and the director follows them.
 - **Runs without the laptop.** The phone app (Bluetooth) and the board's own modes (solid, breathe, party,
