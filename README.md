@@ -5,7 +5,7 @@ The laptop listens to what's playing (Spotify or anything else), works out the b
 the genre and where the song is going (build-up, drop, breakdown), and a lighting "director" picks looks the
 way a club lighting operator would. Every frame goes to the board, and the FPGA drives the strip.
 
-It spans the whole stack: a 4-layer PCB, FPGA logic, ESP32 firmware, real-time audio analysis and a phone app.
+I built every part of it: the 4-layer PCB, the FPGA logic, the ESP32 firmware, the real-time audio analysis and a phone app.
 
 **Built with:** KiCad · Verilog (Yosys, nextpnr, Icarus) · ESP32-C3 (C++, Arduino) · Python (NumPy, ONNX
 Runtime) · Android (Java) · OpenSCAD
@@ -24,7 +24,7 @@ Runtime) · Android (Java) · OpenSCAD
 
 ## What it does
 
-- **Lights it like a club LJ, not a VU meter.** The beat goes into movement and colour (bars snapping to
+- **Lights it like a club LJ would.** The beat goes into movement and colour (bars snapping to
   new positions, colours bouncing between two opposite hues, sweeps, step chases) while brightness only
   follows the size of the section. The strip is treated as 8 virtual fixtures; one base colour, one moving
   layer and at most one accent at a time.
@@ -36,7 +36,7 @@ Runtime) · Android (Java) · OpenSCAD
 - **Colours follow the harmony.** A neural network ([YAMNet](https://tfhub.dev/google/yamnet/1)) picks the
   colour family (R&B, hip-hop, EDM, pop, rock, chill), the key picks the palette, and the bass note's place
   in the key picks which colour leads, so the same song always gets the same colours and they move with the
-  chords. No white: grey and white are never sent to the strip.
+  chords. Grey and white are never sent to the strip.
 - **Cinema mode for films, YouTube and games.** It switches automatically when it hears speech or film
   sounds, and stays there while a video site or player is in front. The strip takes the scene's main
   colours from the laptop screen, the way Hue Sync lights a room (or edge by edge, Ambilight-style, for
