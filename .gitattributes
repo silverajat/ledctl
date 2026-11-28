@@ -1,0 +1,8 @@
+# GitHub language stats: label the repo by the hardware (Verilog + ESP32 firmware),
+# not by the laptop tools, phone app and generated files around it.
+laptop/** linguist-detectable=false
+tools/** linguist-detectable=false
+android/** linguist-detectable=false
+docs/** linguist-documentation
+*.html linguist-detectable=false
+firmware/**/fpga_bits.h linguist-generated
